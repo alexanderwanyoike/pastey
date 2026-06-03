@@ -25,6 +25,7 @@ import {
   getCurrentSession,
   getSessionRequestStatus,
   getStatus,
+  isMissingAppSessionRequestError,
   listPublished,
   pinHomeRelay,
   publishPaste,
@@ -212,16 +213,23 @@ export function App() {
     }
 
     if (stored?.requestId) {
-      const nextResponse = await getSessionRequestStatus(stored.requestId);
-      const nextSession = sessionFromStatus(nextResponse);
-      if (nextSession.status === "active" && nextSession.token) {
-        saveStoredSession({ requestId: nextResponse.request_id, token: nextSession.token });
+      try {
+        const nextResponse = await getSessionRequestStatus(stored.requestId);
+        const nextSession = sessionFromStatus(nextResponse);
+        if (nextSession.status === "active" && nextSession.token) {
+          saveStoredSession({ requestId: nextResponse.request_id, token: nextSession.token });
+          setSession(nextSession);
+          return nextSession.token;
+        }
+        saveStoredSession({ requestId: nextResponse.request_id });
         setSession(nextSession);
-        return nextSession.token;
+        return null;
+      } catch (error) {
+        if (!isMissingAppSessionRequestError(error)) {
+          throw error;
+        }
+        clearStoredSession();
       }
-      saveStoredSession({ requestId: nextResponse.request_id });
-      setSession(nextSession);
-      return null;
     }
 
     const requested = await requestPasteySessionOnce(nextStatus.identity_address);

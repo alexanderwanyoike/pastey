@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   PASTEY_CAPABILITIES,
   fetchTarget,
+  getSessionRequestStatus,
   getStatus,
+  isMissingAppSessionRequestError,
   listPublished,
   publishPaste,
   requestPasteySession
@@ -105,5 +107,21 @@ describe("Pastey daemon API client", () => {
     );
 
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("detects stale app-session request ids from a fresh daemon", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse(
+        {
+          code: "app_session_not_found",
+          error: "app session request not found: req_missing"
+        },
+        { status: 404 }
+      )
+    );
+
+    await expect(getSessionRequestStatus("req_missing")).rejects.toSatisfy((error) =>
+      isMissingAppSessionRequestError(error)
+    );
   });
 });

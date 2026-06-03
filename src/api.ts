@@ -172,6 +172,10 @@ export function apiErrorMessage(error: unknown) {
   return String(error);
 }
 
+export function isMissingAppSessionRequestError(error: unknown) {
+  return error instanceof Error && error.message.includes("app session request not found:");
+}
+
 export function getStatus() {
   return request<NodeStatus>("/jolt-daemon", "/status");
 }
