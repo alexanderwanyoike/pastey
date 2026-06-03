@@ -68,8 +68,49 @@ export type HomeRelayPinResponse = {
   latest_sequence?: number | null;
 };
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/jolt-api${path}`, init);
+export type AppSessionStatus = "pending" | "active" | "rejected" | "revoked" | "expired";
+
+export type AppSessionRequestResponse = {
+  request_id: string;
+  status: AppSessionStatus;
+};
+
+export type AppSessionStatusResponse = {
+  request_id: string;
+  session_id?: string | null;
+  session_token?: string | null;
+  status: AppSessionStatus;
+  identity?: string | null;
+  capabilities: string[];
+  expires_at?: number | null;
+};
+
+export type CurrentAppSession = {
+  request_id: string;
+  session_id?: string | null;
+  app_id: string;
+  app_name: string;
+  identity?: string | null;
+  granted_capabilities: string[];
+  status: AppSessionStatus;
+  expires_at?: number | null;
+  last_used_at?: number | null;
+};
+
+export const PASTEY_CAPABILITIES = [
+  "resolve:public",
+  "fetch:public",
+  "publish:/pastes/*",
+  "inventory:/pastes/*",
+  "pin:own:/pastes/*"
+] as const;
+
+const PASTEY_APP_ID = "pastey.local";
+const PASTEY_APP_NAME = "Pastey";
+const PASTEY_APP_ORIGIN = "http://127.0.0.1:5174";
+const PASTEY_PATH_PREFIX = "/pastes/";
+
+async function parseResponse<T>(response: Response): Promise<T> {
   const contentType = response.headers.get("content-type") || "";
   const body = contentType.includes("application/json")
     ? await response.json()
@@ -88,6 +129,34 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+async function request<T>(basePath: "/jolt-api" | "/jolt-daemon", path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${basePath}${path}`, init);
+  return parseResponse<T>(response);
+}
+
+function bearerInit(sessionToken: string, init: RequestInit = {}): RequestInit {
+  return {
+    ...init,
+    headers: {
+      ...(init.headers as Record<string, string> | undefined),
+      Authorization: `Bearer ${sessionToken}`
+    }
+  };
+}
+
+function jsonInit(sessionToken: string | null, body: unknown): RequestInit {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (sessionToken) {
+    headers.Authorization = `Bearer ${sessionToken}`;
+  }
+
+  return {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body)
+  };
+}
+
 export function apiErrorMessage(error: unknown) {
   if (error instanceof TypeError) {
     return "Cannot reach the Pastey dev proxy or Jolt daemon.";
@@ -104,47 +173,65 @@ export function apiErrorMessage(error: unknown) {
 }
 
 export function getStatus() {
-  return request<NodeStatus>("/status");
+  return request<NodeStatus>("/jolt-daemon", "/status");
 }
 
-export function listPublished() {
-  return request<PublishedContent[]>("/published");
+export function requestPasteySession(identity: string) {
+  return request<AppSessionRequestResponse>(
+    "/jolt-api",
+    "/sessions/request",
+    jsonInit(null, {
+      app_id: PASTEY_APP_ID,
+      app_name: PASTEY_APP_NAME,
+      app_origin: PASTEY_APP_ORIGIN,
+      requested_identity: identity,
+      requested_capabilities: PASTEY_CAPABILITIES
+    })
+  );
 }
 
-export function publishPaste(path: string, text: string) {
+export function getSessionRequestStatus(requestId: string) {
+  return request<AppSessionStatusResponse>("/jolt-api", `/sessions/${requestId}`);
+}
+
+export function getCurrentSession(sessionToken: string) {
+  return request<CurrentAppSession>("/jolt-api", "/session", bearerInit(sessionToken));
+}
+
+export function listPublished(sessionToken: string) {
+  return request<PublishedContent[]>("/jolt-api", "/published", bearerInit(sessionToken));
+}
+
+export function publishPaste(sessionToken: string, path: string, text: string) {
+  if (!path.startsWith(PASTEY_PATH_PREFIX)) {
+    throw new Error("Pastey can only publish under /pastes/");
+  }
+
   const form = new FormData();
   const file = new Blob([text], { type: "text/plain" });
   form.append("file", file, `${path.split("/").pop() || "paste"}.txt`);
   form.append("path", path);
 
-  return request<PublishResponse>("/publish", {
+  return request<PublishResponse>("/jolt-api", "/publish", bearerInit(sessionToken, {
     method: "POST",
     body: form
-  });
+  }));
 }
 
-export function resolveAddress(address: string) {
-  return request<ResolveResponse>("/resolve", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ address })
-  });
+export function resolveAddress(sessionToken: string, address: string) {
+  return request<ResolveResponse>("/jolt-api", "/resolve", jsonInit(sessionToken, { address }));
 }
 
-export function fetchTarget(target: string) {
-  return request<FetchResult>("/fetch", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ target })
-  });
+export function fetchTarget(sessionToken: string, target: string) {
+  return request<FetchResult>("/jolt-api", "/fetch", jsonInit(sessionToken, { target }));
 }
 
-export function pinHomeRelay(contentId: string, path?: string | null) {
-  return request<HomeRelayPinResponse>("/home-relay/pins", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content_id: contentId, path })
-  });
+export function pinHomeRelay(sessionToken: string, contentId: string, path?: string | null) {
+  return request<HomeRelayPinResponse>(
+    "/jolt-api",
+    "/home-relay/pins",
+    jsonInit(sessionToken, { content_id: contentId, path })
+  );
 }
 
 export function decodeFetchData(result: FetchResult) {
