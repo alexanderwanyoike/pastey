@@ -13,7 +13,12 @@ export default defineConfig(({ mode }) => {
         "/jolt-api": {
           target: daemonUrl,
           changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/jolt-api/, "/api/v1")
+          rewrite: (path) => path.replace(/^\/jolt-api/, "/app/v1")
+        },
+        "/jolt-daemon": {
+          target: daemonUrl,
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/jolt-daemon/, "/api/v1")
         }
       }
     }
