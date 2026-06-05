@@ -7,6 +7,7 @@ import {
   ExternalLink,
   KeyRound,
   Link2,
+  Lock,
   Loader2,
   Pin,
   RadioTower,
@@ -20,7 +21,9 @@ import {
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   decodeFetchData,
+  decodePlaintext,
   apiErrorMessage,
+  decryptPaste,
   fetchTarget,
   getCurrentSession,
   getSessionRequestStatus,
@@ -28,8 +31,10 @@ import {
   isMissingAppSessionRequestError,
   listPublished,
   pinHomeRelay,
+  publishPrivatePaste,
   publishPaste,
   requestPasteySession,
+  PASTEY_CAPABILITIES,
   resolveAddress,
   type AppSessionRequestResponse,
   type AppSessionStatus,
@@ -52,7 +57,17 @@ type FetchedPaste = {
   text: string;
   contentId: string;
   size: number;
+  visibility: PasteVisibility;
+  status: "public" | "decrypted" | "ciphertext";
+  message?: string;
   resolved?: ResolveResponse;
+};
+
+type PasteVisibility = "public" | "private";
+
+type LatestPublish = PublishResponse & {
+  visibility: PasteVisibility;
+  recipientCount?: number;
 };
 
 const PASTE_PREFIX = "/pastes/";
@@ -104,6 +119,21 @@ function defaultSlug() {
   const now = new Date();
   const stamp = `${now.getHours()}${String(now.getMinutes()).padStart(2, "0")}`;
   return `note-${stamp}`;
+}
+
+function parseRecipients(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split(/[\s,]+/)
+        .map((recipient) => recipient.trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+function hasPasteyCapabilities(capabilities: string[]) {
+  return PASTEY_CAPABILITIES.every((capability) => capabilities.includes(capability));
 }
 
 function loadStoredSession(): StoredSession | null {
@@ -175,9 +205,13 @@ export function App() {
   const [toast, setToast] = useState<Toast | null>(null);
   const [title, setTitle] = useState(defaultSlug());
   const [paste, setPaste] = useState("");
+  const [pasteVisibility, setPasteVisibility] = useState<PasteVisibility>("public");
+  const [recipientInput, setRecipientInput] = useState("");
   const [target, setTarget] = useState("");
-  const [latestPublish, setLatestPublish] = useState<PublishResponse | null>(null);
+  const [openVisibility, setOpenVisibility] = useState<PasteVisibility>("public");
+  const [latestPublish, setLatestPublish] = useState<LatestPublish | null>(null);
   const [fetched, setFetched] = useState<FetchedPaste | null>(null);
+  const [privatePaths, setPrivatePaths] = useState<Set<string>>(() => new Set());
 
   const pastePath = useMemo(() => `${PASTE_PREFIX}${slugify(title) || "untitled"}`, [title]);
   const sessionToken = session.status === "active" ? session.token || null : null;
@@ -201,11 +235,14 @@ export function App() {
     if (stored?.token) {
       try {
         const current = await getCurrentSession(stored.token);
-        if (current.status === "active") {
+        if (current.status === "active" && hasPasteyCapabilities(current.granted_capabilities)) {
           const activeSession = sessionFromCurrent(current, stored.token);
           saveStoredSession({ requestId: current.request_id, token: stored.token });
           setSession(activeSession);
           return stored.token;
+        }
+        if (current.status === "active") {
+          clearStoredSession();
         }
       } catch {
         // Fall through to request polling; revoked tokens are expected to fail here.
@@ -216,10 +253,23 @@ export function App() {
       try {
         const nextResponse = await getSessionRequestStatus(stored.requestId);
         const nextSession = sessionFromStatus(nextResponse);
-        if (nextSession.status === "active" && nextSession.token) {
+        if (
+          nextSession.status === "active" &&
+          nextSession.token &&
+          hasPasteyCapabilities(nextSession.capabilities)
+        ) {
           saveStoredSession({ requestId: nextResponse.request_id, token: nextSession.token });
           setSession(nextSession);
           return nextSession.token;
+        }
+        if (nextSession.status === "active") {
+          clearStoredSession();
+          setSession({
+            status: "checking",
+            capabilities: [],
+            message: "Requesting updated Pastey private paste permissions."
+          });
+          return syncSession(nextStatus);
         }
         saveStoredSession({ requestId: nextResponse.request_id });
         setSession(nextSession);
@@ -287,10 +337,25 @@ export function App() {
 
     setBusy("publish");
     try {
-      const response = await publishPaste(sessionToken, pastePath, paste);
-      setLatestPublish(response);
+      const response = await (pasteVisibility === "private"
+        ? publishPrivatePaste(sessionToken, pastePath, paste, parseRecipients(recipientInput))
+        : publishPaste(sessionToken, pastePath, paste));
+      const recipientCount =
+        "recipient_count" in response && typeof response.recipient_count === "number"
+          ? response.recipient_count
+          : undefined;
+      setLatestPublish({ ...response, visibility: pasteVisibility, recipientCount });
       setTarget(response.address || response.content_id);
-      setToast({ tone: "ok", message: "Paste published and signed by the local Jolt identity." });
+      if (pasteVisibility === "private") {
+        setPrivatePaths((current) => new Set(current).add(pastePath));
+      }
+      setToast({
+        tone: "ok",
+        message:
+          pasteVisibility === "private"
+            ? "Encrypted paste published. Relays only see ciphertext."
+            : "Paste published and signed by the local Jolt identity."
+      });
       await refresh();
     } catch (error) {
       setToast({ tone: "err", message: apiErrorMessage(error) });
@@ -316,12 +381,49 @@ export function App() {
       if (nextTarget.includes(".jolt")) {
         resolved = await resolveAddress(sessionToken, nextTarget.trim());
       }
+
+      if (openVisibility === "private") {
+        if (!nextTarget.includes(".jolt")) {
+          setToast({ tone: "warn", message: "Encrypted paste decrypt needs a .jolt paste address." });
+          return;
+        }
+        const encrypted = await fetchTarget(sessionToken, nextTarget.trim());
+        try {
+          const decrypted = await decryptPaste(sessionToken, nextTarget.trim());
+          setFetched({
+            target: nextTarget.trim(),
+            text: decodePlaintext(decrypted),
+            contentId: decrypted.content_id,
+            size: decrypted.size,
+            visibility: "private",
+            status: "decrypted",
+            resolved
+          });
+          setToast({ tone: "ok", message: "Encrypted paste fetched and decrypted by the daemon." });
+        } catch (error) {
+          setFetched({
+            target: nextTarget.trim(),
+            text: decodeFetchData(encrypted),
+            contentId: encrypted.content_id,
+            size: encrypted.size,
+            visibility: "private",
+            status: "ciphertext",
+            message: apiErrorMessage(error),
+            resolved
+          });
+          setToast({ tone: "err", message: "Fetched ciphertext, but this daemon cannot decrypt it." });
+        }
+        return;
+      }
+
       const result: FetchResult = await fetchTarget(sessionToken, nextTarget.trim());
       setFetched({
         target: nextTarget.trim(),
         text: decodeFetchData(result),
         contentId: result.content_id,
         size: result.size,
+        visibility: "public",
+        status: "public",
         resolved
       });
       setToast({ tone: "ok", message: "Fetched and verified content from Jolt." });
@@ -364,7 +466,7 @@ export function App() {
           </div>
           <div>
             <p>Pastey</p>
-            <span>Public paste tool over Jolt</span>
+            <span>Public and encrypted pastes over Jolt</span>
           </div>
         </div>
         <div className="top-actions">
@@ -443,6 +545,11 @@ export function App() {
             <h2>New Paste</h2>
           </div>
           <form onSubmit={onPublish} className="compose-form">
+            <ModeSwitch
+              value={pasteVisibility}
+              onChange={setPasteVisibility}
+              labels={{ public: "Public", private: "Encrypted" }}
+            />
             <label>
               <span>Path</span>
               <input value={title} onChange={(event) => setTitle(event.target.value)} />
@@ -451,26 +558,49 @@ export function App() {
               <Link2 size={15} />
               <code>{pastePath}</code>
             </div>
+            {pasteVisibility === "private" ? (
+              <label>
+                <span>Recipients</span>
+                <textarea
+                  className="recipient-input"
+                  value={recipientInput}
+                  onChange={(event) => setRecipientInput(event.target.value)}
+                  spellCheck={false}
+                  placeholder={"bobidentity.jolt\ncarolidentity.jolt"}
+                />
+              </label>
+            ) : null}
             <label>
               <span>Text</span>
               <textarea
                 value={paste}
                 onChange={(event) => setPaste(event.target.value)}
                 spellCheck={false}
-                placeholder="Paste a command, config snippet, canary note, or anything public..."
+                placeholder={
+                  pasteVisibility === "private"
+                    ? "Write a paste that only listed recipients and this identity can decrypt..."
+                    : "Paste a command, config snippet, canary note, or anything public..."
+                }
               />
             </label>
             <button className="primary-button" type="submit" disabled={busy === "publish" || !sessionToken}>
               {busy === "publish" ? <Loader2 className="spin" size={18} /> : <Send size={18} />}
-              {sessionToken ? "Publish paste" : blockedActionLabel}
+              {sessionToken
+                ? pasteVisibility === "private"
+                  ? "Publish encrypted paste"
+                  : "Publish paste"
+                : blockedActionLabel}
             </button>
           </form>
 
           {latestPublish && (
             <div className="receipt">
               <div>
-                <strong>Published</strong>
-                <span>{bytes(latestPublish.size)}</span>
+                <strong>{latestPublish.visibility === "private" ? "Encrypted paste" : "Public paste"}</strong>
+                <span>
+                  {bytes(latestPublish.size)}
+                  {latestPublish.recipientCount ? ` / ${latestPublish.recipientCount} recipients` : ""}
+                </span>
               </div>
               <button type="button" onClick={() => copyValue(latestPublish.address)}>
                 <Copy size={16} />
@@ -487,6 +617,11 @@ export function App() {
             <h2>Open Paste</h2>
           </div>
           <form onSubmit={onOpenTarget} className="open-form">
+            <ModeSwitch
+              value={openVisibility}
+              onChange={setOpenVisibility}
+              labels={{ public: "Public", private: "Encrypted" }}
+            />
             <input
               value={target}
               onChange={(event) => setTarget(event.target.value)}
@@ -502,7 +637,13 @@ export function App() {
             <article className="fetched">
               <header>
                 <div>
-                  <span>Verified content</span>
+                  <span>
+                    {fetched.status === "decrypted"
+                      ? "Decrypted private paste"
+                      : fetched.status === "ciphertext"
+                        ? "Encrypted bytes fetched"
+                        : "Verified public content"}
+                  </span>
                   <strong>{bytes(fetched.size)}</strong>
                 </div>
                 <button type="button" onClick={() => copyValue(fetched.text)} aria-label="Copy fetched text">
@@ -510,6 +651,7 @@ export function App() {
                 </button>
               </header>
               <pre>{fetched.text}</pre>
+              {fetched.message ? <p className="decrypt-note">{fetched.message}</p> : null}
               <footer>
                 <code>{short(fetched.contentId, 16)}</code>
                 {fetched.resolved && <span>seq {fetched.resolved.latest_sequence} from {fetched.resolved.source}</span>}
@@ -542,7 +684,9 @@ export function App() {
                 <header>
                   <div>
                     <strong>{item.path?.replace(PASTE_PREFIX, "") || "untitled"}</strong>
-                    <span>{bytes(item.size)} / seq {item.local_sequence ?? "-"}</span>
+                    <span>
+                      {privatePaths.has(item.path || "") ? "encrypted" : "public or unknown"} / {bytes(item.size)} / seq {item.local_sequence ?? "-"}
+                    </span>
                   </div>
                   <PinState state={item.pin_state} />
                 </header>
@@ -590,6 +734,33 @@ function StatusPill({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
+function ModeSwitch({
+  value,
+  onChange,
+  labels
+}: {
+  value: PasteVisibility;
+  onChange: (value: PasteVisibility) => void;
+  labels: Record<PasteVisibility, string>;
+}) {
+  return (
+    <div className="mode-switch" role="group" aria-label="Paste visibility">
+      {(["public", "private"] as const).map((mode) => (
+        <button
+          key={mode}
+          type="button"
+          className={value === mode ? "selected" : ""}
+          onClick={() => onChange(mode)}
+          aria-pressed={value === mode}
+        >
+          {mode === "private" ? <Lock size={15} /> : <Clipboard size={15} />}
+          {labels[mode]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function SessionPanel({
   session,
   onRequestAgain,
@@ -613,7 +784,7 @@ function SessionPanel({
         {session.capabilities.length > 0 ? (
           <small>{session.capabilities.join(" / ")}</small>
         ) : (
-          <small>resolve, fetch, publish, inventory, and pin under /pastes/*</small>
+          <small>resolve, fetch, publish, encrypted publish/decrypt, inventory, and pin under /pastes/*</small>
         )}
       </div>
       {terminalState ? (
