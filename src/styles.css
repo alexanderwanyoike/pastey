@@ -350,6 +350,32 @@ pre {
   gap: 12px;
 }
 
+.mode-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 4px;
+  border: 2px solid var(--ink);
+  background: var(--paper);
+}
+
+.mode-switch button {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-width: 1px;
+  font-size: 0.82rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.mode-switch button.selected {
+  background: var(--ink);
+  color: var(--surface);
+}
+
 label {
   display: grid;
   gap: 6px;
@@ -383,6 +409,10 @@ textarea {
   resize: vertical;
   padding: 12px;
   line-height: 1.45;
+}
+
+.recipient-input {
+  min-height: 82px;
 }
 
 .path-preview {
@@ -442,6 +472,10 @@ textarea {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
+.open-form .mode-switch {
+  grid-column: 1 / -1;
+}
+
 .fetched {
   display: grid;
   gap: 12px;
@@ -476,6 +510,16 @@ textarea {
   font-size: 0.9rem;
   line-height: 1.5;
   white-space: pre-wrap;
+}
+
+.decrypt-note {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--ink);
+  background: var(--red-soft);
+  color: var(--ink);
+  font-size: 0.88rem;
+  font-weight: 800;
 }
 
 .fetched footer {

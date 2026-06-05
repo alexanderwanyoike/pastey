@@ -28,6 +28,18 @@ export type PublishResponse = {
   latest_sequence?: number;
 };
 
+export type EncryptedPublishResponse = PublishResponse & {
+  recipient_count: number;
+};
+
+export type DecryptResponse = {
+  content_id: string;
+  path: string;
+  plaintext: number[];
+  size: number;
+  content_type: string;
+};
+
 export type PublishedContent = {
   content_id: string;
   size: number;
@@ -101,8 +113,11 @@ export const PASTEY_CAPABILITIES = [
   "resolve:public",
   "fetch:public",
   "publish:/pastes/*",
+  "publish:encrypted:/pastes/*",
   "inventory:/pastes/*",
-  "pin:own:/pastes/*"
+  "pin:own:/pastes/*",
+  "encrypt:/pastes/*",
+  "decrypt:/pastes/*"
 ] as const;
 
 const PASTEY_APP_ID = "pastey.local";
@@ -181,13 +196,16 @@ export function getStatus() {
 }
 
 export function requestPasteySession(identity: string) {
+  const appOrigin =
+    typeof window === "undefined" ? PASTEY_APP_ORIGIN : window.location.origin;
+
   return request<AppSessionRequestResponse>(
     "/jolt-api",
     "/sessions/request",
     jsonInit(null, {
       app_id: PASTEY_APP_ID,
       app_name: PASTEY_APP_NAME,
-      app_origin: PASTEY_APP_ORIGIN,
+      app_origin: appOrigin,
       requested_identity: identity,
       requested_capabilities: PASTEY_CAPABILITIES
     })
@@ -222,12 +240,47 @@ export function publishPaste(sessionToken: string, path: string, text: string) {
   }));
 }
 
+export function publishPrivatePaste(
+  sessionToken: string,
+  path: string,
+  text: string,
+  recipients: string[]
+) {
+  if (!path.startsWith(PASTEY_PATH_PREFIX)) {
+    throw new Error("Pastey can only publish under /pastes/");
+  }
+
+  const trimmedRecipients = recipients.map((recipient) => recipient.trim()).filter(Boolean);
+  if (trimmedRecipients.length === 0) {
+    throw new Error("Private pastes need at least one recipient");
+  }
+
+  return request<EncryptedPublishResponse>(
+    "/jolt-api",
+    "/encrypted/publish",
+    jsonInit(sessionToken, {
+      path,
+      plaintext: Array.from(new TextEncoder().encode(text)),
+      content_type: "text/plain",
+      recipients: trimmedRecipients
+    })
+  );
+}
+
 export function resolveAddress(sessionToken: string, address: string) {
   return request<ResolveResponse>("/jolt-api", "/resolve", jsonInit(sessionToken, { address }));
 }
 
 export function fetchTarget(sessionToken: string, target: string) {
   return request<FetchResult>("/jolt-api", "/fetch", jsonInit(sessionToken, { target }));
+}
+
+export function decryptPaste(sessionToken: string, target: string) {
+  return request<DecryptResponse>(
+    "/jolt-api",
+    "/encrypted/decrypt",
+    jsonInit(sessionToken, { target })
+  );
 }
 
 export function pinHomeRelay(sessionToken: string, contentId: string, path?: string | null) {
@@ -240,4 +293,8 @@ export function pinHomeRelay(sessionToken: string, contentId: string, path?: str
 
 export function decodeFetchData(result: FetchResult) {
   return new TextDecoder().decode(new Uint8Array(result.data));
+}
+
+export function decodePlaintext(result: DecryptResponse) {
+  return new TextDecoder().decode(new Uint8Array(result.plaintext));
 }

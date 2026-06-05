@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   PASTEY_CAPABILITIES,
+  decryptPaste,
   fetchTarget,
   getSessionRequestStatus,
   getStatus,
   isMissingAppSessionRequestError,
   listPublished,
+  publishPrivatePaste,
   publishPaste,
   requestPasteySession
 } from "./api";
@@ -101,9 +103,68 @@ describe("Pastey daemon API client", () => {
     );
   });
 
+  it("sends private paste requests to the encrypted app APIs", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(jsonResponse({ content_id: "cid-private", size: 400, recipient_count: 2 }))
+      .mockResolvedValueOnce(jsonResponse({
+        content_id: "cid-private",
+        path: "/pastes/secret",
+        plaintext: [115, 101, 99, 114, 101, 116],
+        size: 6,
+        content_type: "text/plain"
+      }));
+
+    await publishPrivatePaste("token-1", "/pastes/secret", "secret", [
+      "bob.jolt",
+      "carol.jolt"
+    ]);
+    await decryptPaste("token-1", "alice.jolt/pastes/secret");
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "/jolt-api/encrypted/publish",
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          Authorization: "Bearer token-1",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          path: "/pastes/secret",
+          plaintext: [115, 101, 99, 114, 101, 116],
+          content_type: "text/plain",
+          recipients: ["bob.jolt", "carol.jolt"]
+        })
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "/jolt-api/encrypted/decrypt",
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          Authorization: "Bearer token-1",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ target: "alice.jolt/pastes/secret" })
+      })
+    );
+  });
+
   it("does not send publish requests outside the /pastes scope", async () => {
     expect(() => publishPaste("token-1", "/profile", "nope")).toThrow(
       "Pastey can only publish under /pastes/"
+    );
+
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("does not send encrypted publish requests without recipients or outside /pastes", async () => {
+    expect(() => publishPrivatePaste("token-1", "/profile", "nope", ["bob.jolt"])).toThrow(
+      "Pastey can only publish under /pastes/"
+    );
+    expect(() => publishPrivatePaste("token-1", "/pastes/secret", "nope", [])).toThrow(
+      "Private pastes need at least one recipient"
     );
 
     expect(fetch).not.toHaveBeenCalled();
