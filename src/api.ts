@@ -40,6 +40,17 @@ export type DecryptResponse = {
   content_type: string;
 };
 
+export type OpenPrivateResponse = {
+  content_id: string;
+  path: string;
+  status: "decrypted" | "ciphertext";
+  plaintext?: number[] | null;
+  ciphertext?: number[] | null;
+  size: number;
+  content_type?: string | null;
+  decrypt_error?: string | null;
+};
+
 export type PublishedContent = {
   content_id: string;
   size: number;
@@ -251,9 +262,6 @@ export function publishPrivatePaste(
   }
 
   const trimmedRecipients = recipients.map((recipient) => recipient.trim()).filter(Boolean);
-  if (trimmedRecipients.length === 0) {
-    throw new Error("Private pastes need at least one recipient");
-  }
 
   return request<EncryptedPublishResponse>(
     "/jolt-api",
@@ -283,6 +291,14 @@ export function decryptPaste(sessionToken: string, target: string) {
   );
 }
 
+export function openPrivatePaste(sessionToken: string, target: string) {
+  return request<OpenPrivateResponse>(
+    "/jolt-api",
+    "/encrypted/open",
+    jsonInit(sessionToken, { target })
+  );
+}
+
 export function pinHomeRelay(sessionToken: string, contentId: string, path?: string | null) {
   return request<HomeRelayPinResponse>(
     "/jolt-api",
@@ -297,4 +313,9 @@ export function decodeFetchData(result: FetchResult) {
 
 export function decodePlaintext(result: DecryptResponse) {
   return new TextDecoder().decode(new Uint8Array(result.plaintext));
+}
+
+export function decodePrivateOpen(result: OpenPrivateResponse) {
+  const bytes = result.status === "decrypted" ? result.plaintext : result.ciphertext;
+  return new TextDecoder().decode(new Uint8Array(bytes || []));
 }

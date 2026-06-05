@@ -20,16 +20,16 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
+  decodePrivateOpen,
   decodeFetchData,
-  decodePlaintext,
   apiErrorMessage,
-  decryptPaste,
   fetchTarget,
   getCurrentSession,
   getSessionRequestStatus,
   getStatus,
   isMissingAppSessionRequestError,
   listPublished,
+  openPrivatePaste,
   pinHomeRelay,
   publishPrivatePaste,
   publishPaste,
@@ -42,6 +42,7 @@ import {
   type CurrentAppSession,
   type FetchResult,
   type NodeStatus,
+  type OpenPrivateResponse,
   type PublishedContent,
   type PublishResponse,
   type ResolveResponse
@@ -203,6 +204,7 @@ export function App() {
   });
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
+  const [composeNotice, setComposeNotice] = useState<Toast | null>(null);
   const [title, setTitle] = useState(defaultSlug());
   const [paste, setPaste] = useState("");
   const [pasteVisibility, setPasteVisibility] = useState<PasteVisibility>("public");
@@ -214,6 +216,7 @@ export function App() {
   const [privatePaths, setPrivatePaths] = useState<Set<string>>(() => new Set());
 
   const pastePath = useMemo(() => `${PASTE_PREFIX}${slugify(title) || "untitled"}`, [title]);
+  const recipientCount = useMemo(() => parseRecipients(recipientInput).length, [recipientInput]);
   const sessionToken = session.status === "active" ? session.token || null : null;
   const blockedActionLabel =
     session.status === "pending"
@@ -328,17 +331,21 @@ export function App() {
     event.preventDefault();
     if (!sessionToken) {
       setToast({ tone: "warn", message: "Approve Pastey in Jolt Console before publishing." });
+      setComposeNotice({ tone: "warn", message: "Approve Pastey in Jolt Console before publishing." });
       return;
     }
     if (!paste.trim()) {
       setToast({ tone: "warn", message: "Write a paste before publishing." });
+      setComposeNotice({ tone: "warn", message: "Write a paste before publishing." });
       return;
     }
 
     setBusy("publish");
+    setComposeNotice(null);
     try {
+      const recipients = parseRecipients(recipientInput);
       const response = await (pasteVisibility === "private"
-        ? publishPrivatePaste(sessionToken, pastePath, paste, parseRecipients(recipientInput))
+        ? publishPrivatePaste(sessionToken, pastePath, paste, recipients)
         : publishPaste(sessionToken, pastePath, paste));
       const recipientCount =
         "recipient_count" in response && typeof response.recipient_count === "number"
@@ -353,12 +360,16 @@ export function App() {
         tone: "ok",
         message:
           pasteVisibility === "private"
-            ? "Encrypted paste published. Relays only see ciphertext."
+            ? recipients.length === 0
+              ? "Self-only encrypted paste published. Relays only see ciphertext."
+              : "Encrypted paste published. Relays only see ciphertext."
             : "Paste published and signed by the local Jolt identity."
       });
       await refresh();
     } catch (error) {
-      setToast({ tone: "err", message: apiErrorMessage(error) });
+      const message = apiErrorMessage(error);
+      setToast({ tone: "err", message });
+      setComposeNotice({ tone: "err", message });
     } finally {
       setBusy(null);
     }
@@ -377,45 +388,35 @@ export function App() {
 
     setBusy("fetch");
     try {
-      let resolved: ResolveResponse | undefined;
-      if (nextTarget.includes(".jolt")) {
-        resolved = await resolveAddress(sessionToken, nextTarget.trim());
-      }
-
       if (openVisibility === "private") {
         if (!nextTarget.includes(".jolt")) {
           setToast({ tone: "warn", message: "Encrypted paste decrypt needs a .jolt paste address." });
           return;
         }
-        const encrypted = await fetchTarget(sessionToken, nextTarget.trim());
-        try {
-          const decrypted = await decryptPaste(sessionToken, nextTarget.trim());
-          setFetched({
-            target: nextTarget.trim(),
-            text: decodePlaintext(decrypted),
-            contentId: decrypted.content_id,
-            size: decrypted.size,
-            visibility: "private",
-            status: "decrypted",
-            resolved
-          });
-          setToast({ tone: "ok", message: "Encrypted paste fetched and decrypted by the daemon." });
-        } catch (error) {
-          setFetched({
-            target: nextTarget.trim(),
-            text: decodeFetchData(encrypted),
-            contentId: encrypted.content_id,
-            size: encrypted.size,
-            visibility: "private",
-            status: "ciphertext",
-            message: apiErrorMessage(error),
-            resolved
-          });
-          setToast({ tone: "err", message: "Fetched ciphertext, but this daemon cannot decrypt it." });
-        }
+        const opened: OpenPrivateResponse = await openPrivatePaste(sessionToken, nextTarget.trim());
+        const decrypted = opened.status === "decrypted";
+        setFetched({
+          target: nextTarget.trim(),
+          text: decodePrivateOpen(opened),
+          contentId: opened.content_id,
+          size: opened.size,
+          visibility: "private",
+          status: decrypted ? "decrypted" : "ciphertext",
+          message: decrypted ? undefined : opened.decrypt_error || "This daemon cannot decrypt this paste."
+        });
+        setToast({
+          tone: decrypted ? "ok" : "err",
+          message: decrypted
+            ? "Encrypted paste opened and decrypted by the daemon."
+            : "Encrypted bytes fetched. This daemon cannot decrypt them."
+        });
         return;
       }
 
+      let resolved: ResolveResponse | undefined;
+      if (nextTarget.includes(".jolt")) {
+        resolved = await resolveAddress(sessionToken, nextTarget.trim());
+      }
       const result: FetchResult = await fetchTarget(sessionToken, nextTarget.trim());
       setFetched({
         target: nextTarget.trim(),
@@ -559,14 +560,17 @@ export function App() {
               <code>{pastePath}</code>
             </div>
             {pasteVisibility === "private" ? (
-              <label>
-                <span>Recipients</span>
+              <label className="recipient-field">
+                <span>
+                  Recipients
+                  <small>{recipientCount === 0 ? "private to me" : `${recipientCount} external`}</small>
+                </span>
                 <textarea
                   className="recipient-input"
                   value={recipientInput}
                   onChange={(event) => setRecipientInput(event.target.value)}
                   spellCheck={false}
-                  placeholder={"bobidentity.jolt\ncarolidentity.jolt"}
+                  placeholder={"Leave empty for a self-only private paste\nbobidentity.jolt\ncarolidentity.jolt"}
                 />
               </label>
             ) : null}
@@ -593,13 +597,21 @@ export function App() {
             </button>
           </form>
 
+          {composeNotice ? (
+            <div className={`inline-message ${composeNotice.tone}`} role={composeNotice.tone === "err" ? "alert" : "status"}>
+              {composeNotice.message}
+            </div>
+          ) : null}
+
           {latestPublish && (
             <div className="receipt">
               <div>
                 <strong>{latestPublish.visibility === "private" ? "Encrypted paste" : "Public paste"}</strong>
                 <span>
                   {bytes(latestPublish.size)}
-                  {latestPublish.recipientCount ? ` / ${latestPublish.recipientCount} recipients` : ""}
+                  {latestPublish.recipientCount
+                    ? ` / ${latestPublish.recipientCount} ${latestPublish.recipientCount === 1 ? "recipient" : "recipients"}`
+                    : ""}
                 </span>
               </div>
               <button type="button" onClick={() => copyValue(latestPublish.address)}>
