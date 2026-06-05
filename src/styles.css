@@ -261,6 +261,28 @@ pre {
   background: var(--red-soft);
 }
 
+.inline-message {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--ink);
+  color: var(--ink);
+  font-size: 0.88rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.inline-message.ok {
+  background: var(--green-soft);
+}
+
+.inline-message.warn {
+  background: var(--gold-soft);
+}
+
+.inline-message.err {
+  background: var(--red-soft);
+}
+
 .workspace {
   grid-template-columns: 300px minmax(360px, 1fr) minmax(360px, 0.9fr);
   margin-top: 22px;
@@ -413,6 +435,24 @@ textarea {
 
 .recipient-input {
   min-height: 82px;
+}
+
+.recipient-field > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.recipient-field small {
+  padding: 3px 7px;
+  border: 1px solid var(--ink);
+  background: var(--gold-soft);
+  color: var(--ink);
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .path-preview {
