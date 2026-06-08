@@ -57,8 +57,8 @@ http://127.0.0.1:5174
 
 In web dev mode the Vite proxy forwards:
 
-- `/jolt-api/*` to `http://127.0.0.1:9862/app/v1/*`
-- `/jolt-daemon/status` to `http://127.0.0.1:9862/api/v1/status`
+- `/app/v1/*` to `http://127.0.0.1:9862/app/v1/*`
+- `/api/v1/status` to `http://127.0.0.1:9862/api/v1/status`
 
 Pastey uses the daemon status endpoint only to discover the local identity for
 the initial session request. Publishing, encrypted publishing, decrypting,

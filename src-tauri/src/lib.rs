@@ -3,6 +3,7 @@ use reqwest::{
     multipart::{Form, Part},
 };
 use serde_json::Value;
+use std::time::Duration;
 
 const DEFAULT_DAEMON_URL: &str = "http://127.0.0.1:9862";
 
@@ -18,7 +19,11 @@ async fn daemon_request(
         .parse::<reqwest::Method>()
         .map_err(|error| format!("invalid daemon request method {method}: {error}"))?;
     let url = daemon_url(&base_path, &path)?;
-    let mut request = reqwest::Client::new()
+    let client = reqwest::Client::builder()
+        .timeout(request_timeout(&base_path, &path))
+        .build()
+        .map_err(|error| format!("failed to create daemon HTTP client: {error}"))?;
+    let mut request = client
         .request(method, url)
         .header(ACCEPT, "application/json");
 
@@ -55,7 +60,7 @@ async fn daemon_publish_text(
         .map_err(|error| format!("failed to prepare paste upload: {error}"))?;
     let form = Form::new().part("file", file).text("path", path);
     let request = reqwest::Client::new()
-        .post(daemon_url("/jolt-api", "/publish")?)
+        .post(daemon_url("/app/v1", "/publish")?)
         .header(ACCEPT, "application/json")
         .header(AUTHORIZATION, format!("Bearer {session_token}"))
         .multipart(form);
@@ -105,8 +110,7 @@ async fn parse_response(
 
 fn daemon_url(base_path: &str, path: &str) -> Result<String, String> {
     let prefix = match base_path {
-        "/jolt-api" => "/app/v1",
-        "/jolt-daemon" => "/api/v1",
+        "/app/v1" | "/api/v1" => base_path,
         _ => return Err(format!("unsupported daemon base path: {base_path}")),
     };
 
@@ -130,6 +134,14 @@ fn daemon_base_url() -> String {
     std::env::var("JOLT_DAEMON_URL").unwrap_or_else(|_| DEFAULT_DAEMON_URL.to_string())
 }
 
+fn request_timeout(base_path: &str, path: &str) -> Duration {
+    if base_path == "/api/v1" && normalize_path(path) == "/status" {
+        Duration::from_secs(3)
+    } else {
+        Duration::from_secs(60)
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -146,13 +158,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn daemon_url_maps_app_api_proxy_paths() {
+    fn daemon_url_accepts_daemon_api_paths() {
         assert_eq!(
-            daemon_url("/jolt-api", "/published").unwrap(),
+            daemon_url("/app/v1", "/published").unwrap(),
             "http://127.0.0.1:9862/app/v1/published"
         );
         assert_eq!(
-            daemon_url("/jolt-daemon", "status").unwrap(),
+            daemon_url("/api/v1", "status").unwrap(),
             "http://127.0.0.1:9862/api/v1/status"
         );
     }
@@ -162,6 +174,15 @@ mod tests {
         assert_eq!(
             daemon_url("/admin", "/status").unwrap_err(),
             "unsupported daemon base path: /admin"
+        );
+    }
+
+    #[test]
+    fn status_request_uses_short_timeout() {
+        assert_eq!(request_timeout("/api/v1", "status"), Duration::from_secs(3));
+        assert_eq!(
+            request_timeout("/app/v1", "/fetch"),
+            Duration::from_secs(60)
         );
     }
 }

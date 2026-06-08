@@ -105,6 +105,7 @@ export type AppSessionStatusResponse = {
   session_id?: string | null;
   session_token?: string | null;
   status: AppSessionStatus;
+  requested_identity?: string | null;
   identity?: string | null;
   capabilities: string[];
   expires_at?: number | null;
@@ -137,6 +138,10 @@ const PASTEY_APP_ID = "pastey.local";
 const PASTEY_APP_NAME = "Pastey";
 const PASTEY_APP_ORIGIN = "http://127.0.0.1:5174";
 const PASTEY_PATH_PREFIX = "/pastes/";
+const APP_API_BASE = "/app/v1";
+const DAEMON_API_BASE = "/api/v1";
+
+type ApiBasePath = typeof APP_API_BASE | typeof DAEMON_API_BASE;
 
 async function parseResponse<T>(response: Response): Promise<T> {
   const contentType = response.headers.get("content-type") || "";
@@ -158,7 +163,13 @@ async function parseResponse<T>(response: Response): Promise<T> {
 }
 
 function isDesktopRuntime() {
-  return isTauri();
+  const internals =
+    typeof window === "undefined"
+      ? null
+      : (window as typeof window & {
+          __TAURI_INTERNALS__?: { invoke?: unknown };
+        }).__TAURI_INTERNALS__;
+  return isTauri() || typeof internals?.invoke === "function";
 }
 
 function authorizationToken(init?: RequestInit) {
@@ -176,7 +187,7 @@ function jsonBody(init?: RequestInit) {
 }
 
 async function desktopRequest<T>(
-  basePath: "/jolt-api" | "/jolt-daemon",
+  basePath: ApiBasePath,
   path: string,
   init?: RequestInit
 ): Promise<T> {
@@ -189,7 +200,7 @@ async function desktopRequest<T>(
   });
 }
 
-async function request<T>(basePath: "/jolt-api" | "/jolt-daemon", path: string, init?: RequestInit): Promise<T> {
+async function request<T>(basePath: ApiBasePath, path: string, init?: RequestInit): Promise<T> {
   if (isDesktopRuntime()) {
     return desktopRequest<T>(basePath, path, init);
   }
@@ -241,7 +252,7 @@ export function isMissingAppSessionRequestError(error: unknown) {
 }
 
 export function getStatus() {
-  return request<NodeStatus>("/jolt-daemon", "/status");
+  return request<NodeStatus>(DAEMON_API_BASE, "/status");
 }
 
 export function requestPasteySession(identity: string) {
@@ -249,7 +260,7 @@ export function requestPasteySession(identity: string) {
     typeof window === "undefined" ? PASTEY_APP_ORIGIN : window.location.origin;
 
   return request<AppSessionRequestResponse>(
-    "/jolt-api",
+    APP_API_BASE,
     "/sessions/request",
     jsonInit(null, {
       app_id: PASTEY_APP_ID,
@@ -262,15 +273,15 @@ export function requestPasteySession(identity: string) {
 }
 
 export function getSessionRequestStatus(requestId: string) {
-  return request<AppSessionStatusResponse>("/jolt-api", `/sessions/${requestId}`);
+  return request<AppSessionStatusResponse>(APP_API_BASE, `/sessions/${requestId}`);
 }
 
 export function getCurrentSession(sessionToken: string) {
-  return request<CurrentAppSession>("/jolt-api", "/session", bearerInit(sessionToken));
+  return request<CurrentAppSession>(APP_API_BASE, "/session", bearerInit(sessionToken));
 }
 
 export function listPublished(sessionToken: string) {
-  return request<PublishedContent[]>("/jolt-api", "/published", bearerInit(sessionToken));
+  return request<PublishedContent[]>(APP_API_BASE, "/published", bearerInit(sessionToken));
 }
 
 export function publishPaste(sessionToken: string, path: string, text: string) {
@@ -291,7 +302,7 @@ export function publishPaste(sessionToken: string, path: string, text: string) {
   form.append("file", file, `${path.split("/").pop() || "paste"}.txt`);
   form.append("path", path);
 
-  return request<PublishResponse>("/jolt-api", "/publish", bearerInit(sessionToken, {
+  return request<PublishResponse>(APP_API_BASE, "/publish", bearerInit(sessionToken, {
     method: "POST",
     body: form
   }));
@@ -310,7 +321,7 @@ export function publishPrivatePaste(
   const trimmedRecipients = recipients.map((recipient) => recipient.trim()).filter(Boolean);
 
   return request<EncryptedPublishResponse>(
-    "/jolt-api",
+    APP_API_BASE,
     "/encrypted/publish",
     jsonInit(sessionToken, {
       path,
@@ -322,16 +333,16 @@ export function publishPrivatePaste(
 }
 
 export function resolveAddress(sessionToken: string, address: string) {
-  return request<ResolveResponse>("/jolt-api", "/resolve", jsonInit(sessionToken, { address }));
+  return request<ResolveResponse>(APP_API_BASE, "/resolve", jsonInit(sessionToken, { address }));
 }
 
 export function fetchTarget(sessionToken: string, target: string) {
-  return request<FetchResult>("/jolt-api", "/fetch", jsonInit(sessionToken, { target }));
+  return request<FetchResult>(APP_API_BASE, "/fetch", jsonInit(sessionToken, { target }));
 }
 
 export function decryptPaste(sessionToken: string, target: string) {
   return request<DecryptResponse>(
-    "/jolt-api",
+    APP_API_BASE,
     "/encrypted/decrypt",
     jsonInit(sessionToken, { target })
   );
@@ -339,7 +350,7 @@ export function decryptPaste(sessionToken: string, target: string) {
 
 export function openPrivatePaste(sessionToken: string, target: string) {
   return request<OpenPrivateResponse>(
-    "/jolt-api",
+    APP_API_BASE,
     "/encrypted/open",
     jsonInit(sessionToken, { target })
   );
@@ -347,7 +358,7 @@ export function openPrivatePaste(sessionToken: string, target: string) {
 
 export function pinHomeRelay(sessionToken: string, contentId: string, path?: string | null) {
   return request<HomeRelayPinResponse>(
-    "/jolt-api",
+    APP_API_BASE,
     "/home-relay/pins",
     jsonInit(sessionToken, { content_id: contentId, path })
   );
