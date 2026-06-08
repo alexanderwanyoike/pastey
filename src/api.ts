@@ -1,3 +1,5 @@
+import { invoke, isTauri } from "@tauri-apps/api/core";
+
 export type NodeStatus = {
   peer_id: string;
   identity_address: string;
@@ -155,7 +157,43 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return body as T;
 }
 
+function isDesktopRuntime() {
+  return isTauri();
+}
+
+function authorizationToken(init?: RequestInit) {
+  const headers = init?.headers;
+  if (!headers || headers instanceof Headers || Array.isArray(headers)) {
+    return null;
+  }
+
+  const authorization = headers.Authorization || headers.authorization;
+  return authorization?.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : null;
+}
+
+function jsonBody(init?: RequestInit) {
+  return typeof init?.body === "string" ? JSON.parse(init.body) : null;
+}
+
+async function desktopRequest<T>(
+  basePath: "/jolt-api" | "/jolt-daemon",
+  path: string,
+  init?: RequestInit
+): Promise<T> {
+  return invoke<T>("daemon_request", {
+    basePath,
+    path,
+    method: init?.method || "GET",
+    body: jsonBody(init),
+    sessionToken: authorizationToken(init)
+  });
+}
+
 async function request<T>(basePath: "/jolt-api" | "/jolt-daemon", path: string, init?: RequestInit): Promise<T> {
+  if (isDesktopRuntime()) {
+    return desktopRequest<T>(basePath, path, init);
+  }
+
   const response = await fetch(`${basePath}${path}`, init);
   return parseResponse<T>(response);
 }
@@ -185,12 +223,12 @@ function jsonInit(sessionToken: string | null, body: unknown): RequestInit {
 
 export function apiErrorMessage(error: unknown) {
   if (error instanceof TypeError) {
-    return "Cannot reach the Pastey dev proxy or Jolt daemon.";
+    return "Cannot reach the Jolt daemon. Start Jolt Console and make sure the daemon is running.";
   }
 
   if (error instanceof Error) {
     if (error.message === "HTTP 500" || error.message === "HTTP 502") {
-      return "Cannot reach the Jolt daemon. Start it on the configured API port and refresh.";
+      return "Cannot reach the Jolt daemon. Start Jolt Console and make sure the daemon is running.";
     }
     return error.message;
   }
@@ -238,6 +276,14 @@ export function listPublished(sessionToken: string) {
 export function publishPaste(sessionToken: string, path: string, text: string) {
   if (!path.startsWith(PASTEY_PATH_PREFIX)) {
     throw new Error("Pastey can only publish under /pastes/");
+  }
+
+  if (isDesktopRuntime()) {
+    return invoke<PublishResponse>("daemon_publish_text", {
+      sessionToken,
+      path,
+      text
+    });
   }
 
   const form = new FormData();

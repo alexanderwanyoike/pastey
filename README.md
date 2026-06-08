@@ -6,21 +6,46 @@ It is intentionally separate from the Jolt protocol repo. Pastey talks to a
 local Jolt daemon through a scoped app session and uses `.jolt` paths under
 `/pastes`.
 
-## Run
+## Run as a Desktop App
 
-Start a Jolt daemon first:
+Pastey is desktop-first. Run Jolt Console first and let it start the local Jolt
+daemon. Pastey does not own the daemon lifecycle; it connects to the local daemon
+and asks Jolt Console for scoped `/pastes/*` permission.
 
-```sh
-cd ../jolt
-cargo run -p jolt-node -- start
-```
-
-Start Jolt Console so you can approve Pastey's app session request. Then run
-Pastey:
+Build the desktop app:
 
 ```sh
 cd ../jolt-apps/pastey
 npm install
+npm run desktop:build
+```
+
+The Linux AppImage is written to:
+
+```text
+src-tauri/target/release/bundle/appimage/Pastey_0.1.0_amd64.AppImage
+```
+
+Launch it while Jolt Console is running, then approve Pastey's app session
+request in Jolt Console.
+
+For desktop development:
+
+```sh
+npm run desktop:dev
+```
+
+To target a non-default daemon port:
+
+```sh
+JOLT_DAEMON_URL=http://127.0.0.1:9864 npm run desktop:dev
+```
+
+## Web Dev Fallback
+
+The Vite web app remains useful for development:
+
+```sh
 npm run dev
 ```
 
@@ -30,7 +55,7 @@ Open:
 http://127.0.0.1:5174
 ```
 
-By default the Vite proxy forwards:
+In web dev mode the Vite proxy forwards:
 
 - `/jolt-api/*` to `http://127.0.0.1:9862/app/v1/*`
 - `/jolt-daemon/status` to `http://127.0.0.1:9862/api/v1/status`
@@ -52,6 +77,14 @@ Card 053 can be verified with three local identities:
 1. Start Alice, Bob, and Carol daemons with separate data directories and API
    ports.
 2. Start one Pastey client per daemon, for example:
+
+   ```sh
+   JOLT_DAEMON_URL=http://127.0.0.1:9862 npm run desktop:dev
+   JOLT_DAEMON_URL=http://127.0.0.1:9864 npm run desktop:dev
+   JOLT_DAEMON_URL=http://127.0.0.1:9866 npm run desktop:dev
+   ```
+
+   The Vite fallback can also be used with separate ports:
 
    ```sh
    VITE_JOLT_DAEMON_URL=http://127.0.0.1:9862 npm run dev -- --port 5174
@@ -88,3 +121,7 @@ Not yet supported:
 
 - editing recipient access after publish
 - local key management UI
+
+Pinning is optional. Publishing, opening public pastes, and opening private
+pastes do not require a home relay. If a home relay is configured in Jolt, Pastey
+can ask Jolt to pin local paste content for availability.

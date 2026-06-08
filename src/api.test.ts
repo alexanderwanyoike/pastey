@@ -1,4 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const invokeMock = vi.hoisted(() => vi.fn());
+const isTauriMock = vi.hoisted(() => vi.fn(() => false));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: invokeMock,
+  isTauri: isTauriMock
+}));
+
 import {
   PASTEY_CAPABILITIES,
   decryptPaste,
@@ -23,10 +32,13 @@ function jsonResponse(body: unknown, init: ResponseInit = {}) {
 
 describe("Pastey daemon API client", () => {
   beforeEach(() => {
+    isTauriMock.mockReturnValue(false);
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ok: true })));
   });
 
   afterEach(() => {
+    invokeMock.mockReset();
+    isTauriMock.mockReset();
     vi.unstubAllGlobals();
   });
 
@@ -102,6 +114,36 @@ describe("Pastey daemon API client", () => {
         body: JSON.stringify({ target: "alice.jolt/pastes/hello" })
       })
     );
+  });
+
+  it("uses Tauri daemon commands for desktop JSON app API requests", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValueOnce([]);
+
+    await listPublished("token-1");
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(invokeMock).toHaveBeenCalledWith("daemon_request", {
+      basePath: "/jolt-api",
+      path: "/published",
+      method: "GET",
+      body: null,
+      sessionToken: "token-1"
+    });
+  });
+
+  it("uses a Tauri daemon command for desktop text publishing", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValueOnce({ content_id: "cid", size: 5 });
+
+    await publishPaste("token-1", "/pastes/hello", "hello");
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(invokeMock).toHaveBeenCalledWith("daemon_publish_text", {
+      sessionToken: "token-1",
+      path: "/pastes/hello",
+      text: "hello"
+    });
   });
 
   it("sends private paste requests to the encrypted app APIs", async () => {
