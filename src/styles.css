@@ -130,6 +130,24 @@ pre {
   place-items: center;
 }
 
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.update-button {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  background: var(--blue-soft);
+}
+
 .hero {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;

@@ -47,6 +47,11 @@ import {
   type PublishResponse,
   type ResolveResponse
 } from "./api";
+import {
+  tauriPasteyUpdateClient,
+  type PasteyUpdateCheck,
+  type PasteyUpdateClient
+} from "./update/client";
 
 type Toast = {
   tone: "ok" | "warn" | "err";
@@ -215,6 +220,9 @@ export function App() {
   const [latestPublish, setLatestPublish] = useState<LatestPublish | null>(null);
   const [fetched, setFetched] = useState<FetchedPaste | null>(null);
   const [privatePaths, setPrivatePaths] = useState<Set<string>>(() => new Set());
+  const [updateCheck, setUpdateCheck] = useState<PasteyUpdateCheck | null>(null);
+  const [updateAction, setUpdateAction] = useState<"check" | "install" | null>(null);
+  const updateClient: PasteyUpdateClient = tauriPasteyUpdateClient;
 
   const pastePath = useMemo(() => `${PASTE_PREFIX}${slugify(title) || "untitled"}`, [title]);
   const recipientCount = useMemo(() => parseRecipients(recipientInput).length, [recipientInput]);
@@ -514,6 +522,34 @@ export function App() {
     }
   }
 
+  async function checkPasteyUpdate() {
+    setUpdateAction("check");
+    try {
+      const nextUpdateCheck = await updateClient.check();
+      setUpdateCheck(nextUpdateCheck);
+      setToast({
+        tone: nextUpdateCheck.available ? "ok" : "warn",
+        message: nextUpdateCheck.available
+          ? `Update available: ${nextUpdateCheck.version}`
+          : "Pastey is up to date."
+      });
+    } catch (error) {
+      setToast({ tone: "err", message: apiErrorMessage(error) });
+    } finally {
+      setUpdateAction(null);
+    }
+  }
+
+  async function installPasteyUpdate() {
+    setUpdateAction("install");
+    try {
+      await updateClient.installAndRelaunch();
+    } catch (error) {
+      setToast({ tone: "err", message: apiErrorMessage(error) });
+      setUpdateAction(null);
+    }
+  }
+
   return (
     <main className="shell">
       <header className="topbar">
@@ -527,6 +563,27 @@ export function App() {
           </div>
         </div>
         <div className="top-actions">
+          {updateCheck?.available ? (
+            <button
+              type="button"
+              className="update-button"
+              onClick={installPasteyUpdate}
+              disabled={updateAction !== null}
+            >
+              {updateAction === "install" ? <Loader2 className="spin" size={16} /> : <ArrowDownToLine size={16} />}
+              Update available
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="icon-button"
+            onClick={checkPasteyUpdate}
+            disabled={updateAction !== null}
+            aria-label="Check for Pastey updates"
+            title="Check for Pastey updates"
+          >
+            {updateAction === "check" ? <Loader2 className="spin" size={18} /> : <ArrowDownToLine size={18} />}
+          </button>
           <button type="button" className="icon-button" onClick={refresh} aria-label="Refresh">
             {loading ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
           </button>
