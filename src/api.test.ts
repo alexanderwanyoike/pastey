@@ -1,4 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const invokeMock = vi.hoisted(() => vi.fn());
+const isTauriMock = vi.hoisted(() => vi.fn(() => false));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: invokeMock,
+  isTauri: isTauriMock
+}));
+
 import {
   PASTEY_CAPABILITIES,
   decryptPaste,
@@ -23,10 +32,13 @@ function jsonResponse(body: unknown, init: ResponseInit = {}) {
 
 describe("Pastey daemon API client", () => {
   beforeEach(() => {
+    isTauriMock.mockReturnValue(false);
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ok: true })));
   });
 
   afterEach(() => {
+    invokeMock.mockReset();
+    isTauriMock.mockReset();
     vi.unstubAllGlobals();
   });
 
@@ -41,7 +53,7 @@ describe("Pastey daemon API client", () => {
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/jolt-api/sessions/request",
+      "/app/v1/sessions/request",
       expect.objectContaining({
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -56,12 +68,33 @@ describe("Pastey daemon API client", () => {
     );
   });
 
+  it("can request Pastey permissions for the local identity before the address is known", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse({ request_id: "req_1", status: "pending" })
+    );
+
+    await requestPasteySession(null);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/app/v1/sessions/request",
+      expect.objectContaining({
+        body: JSON.stringify({
+          app_id: "pastey.local",
+          app_name: "Pastey",
+          app_origin: "http://127.0.0.1:5174",
+          requested_identity: null,
+          requested_capabilities: PASTEY_CAPABILITIES
+        })
+      })
+    );
+  });
+
   it("uses the daemon status endpoint only for local identity discovery", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ identity_address: "alice.jolt" }));
 
     await expect(getStatus()).resolves.toEqual({ identity_address: "alice.jolt" });
 
-    expect(fetch).toHaveBeenCalledWith("/jolt-daemon/status", undefined);
+    expect(fetch).toHaveBeenCalledWith("/api/v1/status", undefined);
   });
 
   it("sends bearer session tokens on app API reads and writes", async () => {
@@ -76,14 +109,14 @@ describe("Pastey daemon API client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "/jolt-api/published",
+      "/app/v1/published",
       expect.objectContaining({
         headers: { Authorization: "Bearer token-1" }
       })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "/jolt-api/publish",
+      "/app/v1/publish",
       expect.objectContaining({
         method: "POST",
         headers: { Authorization: "Bearer token-1" },
@@ -92,7 +125,7 @@ describe("Pastey daemon API client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       3,
-      "/jolt-api/fetch",
+      "/app/v1/fetch",
       expect.objectContaining({
         method: "POST",
         headers: {
@@ -102,6 +135,64 @@ describe("Pastey daemon API client", () => {
         body: JSON.stringify({ target: "alice.jolt/pastes/hello" })
       })
     );
+  });
+
+  it("uses Tauri daemon commands for desktop JSON app API requests", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValueOnce([]);
+
+    await listPublished("token-1");
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(invokeMock).toHaveBeenCalledWith("daemon_request", {
+      basePath: "/app/v1",
+      path: "/published",
+      method: "GET",
+      body: null,
+      sessionToken: "token-1"
+    });
+  });
+
+  it("uses Tauri daemon commands when the IPC internals are available", async () => {
+    isTauriMock.mockReturnValue(false);
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: { invoke: vi.fn() } });
+    invokeMock.mockResolvedValueOnce({ identity_address: "alice-public.jolt" });
+
+    await getStatus();
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(invokeMock).toHaveBeenCalledWith("daemon_request", {
+      basePath: "/api/v1",
+      path: "/status",
+      method: "GET",
+      body: null,
+      sessionToken: null
+    });
+  });
+
+  it("does not treat a non-IPC Tauri internals object as desktop runtime", async () => {
+    isTauriMock.mockReturnValue(false);
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ identity_address: "alice-public.jolt" }));
+
+    await getStatus();
+
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledWith("/api/v1/status", undefined);
+  });
+
+  it("uses a Tauri daemon command for desktop text publishing", async () => {
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockResolvedValueOnce({ content_id: "cid", size: 5 });
+
+    await publishPaste("token-1", "/pastes/hello", "hello");
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(invokeMock).toHaveBeenCalledWith("daemon_publish_text", {
+      sessionToken: "token-1",
+      path: "/pastes/hello",
+      text: "hello"
+    });
   });
 
   it("sends private paste requests to the encrypted app APIs", async () => {
@@ -123,7 +214,7 @@ describe("Pastey daemon API client", () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      "/jolt-api/encrypted/publish",
+      "/app/v1/encrypted/publish",
       expect.objectContaining({
         method: "POST",
         headers: {
@@ -140,7 +231,7 @@ describe("Pastey daemon API client", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "/jolt-api/encrypted/decrypt",
+      "/app/v1/encrypted/decrypt",
       expect.objectContaining({
         method: "POST",
         headers: {
@@ -168,7 +259,7 @@ describe("Pastey daemon API client", () => {
 
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenCalledWith(
-      "/jolt-api/encrypted/open",
+      "/app/v1/encrypted/open",
       expect.objectContaining({
         method: "POST",
         headers: {
@@ -196,7 +287,7 @@ describe("Pastey daemon API client", () => {
     await publishPrivatePaste("token-1", "/pastes/secret", "nope", []);
 
     expect(fetch).toHaveBeenCalledWith(
-      "/jolt-api/encrypted/publish",
+      "/app/v1/encrypted/publish",
       expect.objectContaining({
         body: JSON.stringify({
           path: "/pastes/secret",

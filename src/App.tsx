@@ -78,6 +78,7 @@ let sessionRequestInFlight: Promise<AppSessionRequestResponse> | null = null;
 type StoredSession = {
   requestId: string;
   token?: string | null;
+  identity?: string | null;
 };
 
 type PasteySession = {
@@ -154,7 +155,7 @@ function clearStoredSession() {
   window.localStorage.removeItem(SESSION_STORAGE_KEY);
 }
 
-async function requestPasteySessionOnce(identity: string) {
+async function requestPasteySessionOnce(identity: string | null) {
   if (!sessionRequestInFlight) {
     sessionRequestInFlight = requestPasteySession(identity).finally(() => {
       sessionRequestInFlight = null;
@@ -176,7 +177,7 @@ function sessionFromStatus(response: AppSessionStatusResponse): PasteySession {
     status: response.status,
     requestId: response.request_id,
     token: response.session_token,
-    identity: response.identity,
+    identity: response.identity ?? response.requested_identity,
     capabilities: response.capabilities,
     message: messageByStatus[response.status]
   };
@@ -232,7 +233,7 @@ export function App() {
     [published]
   );
 
-  async function syncSession(nextStatus: NodeStatus): Promise<string | null> {
+  async function syncSession(identity: string | null): Promise<string | null> {
     const stored = loadStoredSession();
 
     if (stored?.token) {
@@ -240,7 +241,11 @@ export function App() {
         const current = await getCurrentSession(stored.token);
         if (current.status === "active" && hasPasteyCapabilities(current.granted_capabilities)) {
           const activeSession = sessionFromCurrent(current, stored.token);
-          saveStoredSession({ requestId: current.request_id, token: stored.token });
+          saveStoredSession({
+            requestId: current.request_id,
+            token: stored.token,
+            identity: current.identity
+          });
           setSession(activeSession);
           return stored.token;
         }
@@ -261,7 +266,11 @@ export function App() {
           nextSession.token &&
           hasPasteyCapabilities(nextSession.capabilities)
         ) {
-          saveStoredSession({ requestId: nextResponse.request_id, token: nextSession.token });
+          saveStoredSession({
+            requestId: nextResponse.request_id,
+            token: nextSession.token,
+            identity: nextSession.identity
+          });
           setSession(nextSession);
           return nextSession.token;
         }
@@ -272,9 +281,9 @@ export function App() {
             capabilities: [],
             message: "Requesting updated Pastey private paste permissions."
           });
-          return syncSession(nextStatus);
+          return syncSession(identity);
         }
-        saveStoredSession({ requestId: nextResponse.request_id });
+        saveStoredSession({ requestId: nextResponse.request_id, identity: nextSession.identity });
         setSession(nextSession);
         return null;
       } catch (error) {
@@ -285,11 +294,20 @@ export function App() {
       }
     }
 
-    const requested = await requestPasteySessionOnce(nextStatus.identity_address);
-    saveStoredSession({ requestId: requested.request_id });
+    if (!identity) {
+      setSession({
+        status: "checking",
+        capabilities: [],
+        message: "Requesting Pastey permissions for the local Jolt identity."
+      });
+    }
+
+    const requested = await requestPasteySessionOnce(identity);
+    saveStoredSession({ requestId: requested.request_id, identity });
     setSession({
       status: requested.status,
       requestId: requested.request_id,
+      identity,
       capabilities: [],
       message: "Waiting for approval in Jolt Console."
     });
@@ -298,12 +316,28 @@ export function App() {
 
   async function refresh() {
     try {
-      const nextStatus = await getStatus();
-      const token = await syncSession(nextStatus);
+      const stored = loadStoredSession();
+      let token = await syncSession(status?.identity_address ?? session.identity ?? stored?.identity ?? null);
+      let nextStatus: NodeStatus | null = null;
+      let statusError: unknown = null;
+
+      try {
+        nextStatus = await getStatus();
+        setStatus(nextStatus);
+      } catch (error) {
+        statusError = error;
+      }
+
+      if (!token && nextStatus) {
+        token = await syncSession(nextStatus.identity_address);
+      }
       const nextPublished = token ? await listPublished(token) : [];
-      setStatus(nextStatus);
       setPublished(nextPublished);
-      setToast(null);
+      if (!token && !loadStoredSession()?.requestId && statusError) {
+        setToast({ tone: "err", message: apiErrorMessage(statusError) });
+      } else {
+        setToast(null);
+      }
     } catch (error) {
       setToast({ tone: "err", message: apiErrorMessage(error) });
     } finally {
@@ -318,13 +352,35 @@ export function App() {
   }, []);
 
   async function requestNewSession() {
+    const identity = session.identity ?? status?.identity_address ?? loadStoredSession()?.identity ?? null;
     clearStoredSession();
     setSession({
       status: "checking",
+      identity,
       capabilities: [],
       message: "Requesting a new Pastey app session."
     });
-    await refresh();
+    if (identity) {
+      const requested = await requestPasteySessionOnce(identity);
+      saveStoredSession({ requestId: requested.request_id, identity });
+      setSession({
+        status: requested.status,
+        requestId: requested.request_id,
+        identity,
+        capabilities: [],
+        message: "Waiting for approval in Jolt Console."
+      });
+      return;
+    }
+    const requested = await requestPasteySessionOnce(null);
+    saveStoredSession({ requestId: requested.request_id, identity: null });
+    setSession({
+      status: requested.status,
+      requestId: requested.request_id,
+      identity: null,
+      capabilities: [],
+      message: "Waiting for approval in Jolt Console."
+    });
   }
 
   async function onPublish(event: FormEvent) {

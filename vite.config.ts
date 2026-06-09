@@ -10,15 +10,13 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5174,
       proxy: {
-        "/jolt-api": {
+        "/app/v1": {
           target: daemonUrl,
-          changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/jolt-api/, "/app/v1")
+          changeOrigin: true
         },
-        "/jolt-daemon": {
+        "/api/v1": {
           target: daemonUrl,
-          changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/jolt-daemon/, "/api/v1")
+          changeOrigin: true
         }
       }
     }
