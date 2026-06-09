@@ -1,23 +1,107 @@
 # Pastey
 
-Pastey is a small Jolt app prototype for public pastes.
+Pastey is a small Jolt app prototype for public and encrypted pastes.
 
-It is intentionally separate from the Jolt protocol repo. Pastey talks to a local Jolt daemon through HTTP and uses `.jolt` paths under `/pastes`.
+It is intentionally separate from the Jolt protocol repo. Pastey talks to a
+local Jolt daemon through a scoped app session and uses `.jolt` paths under
+`/pastes`.
 
-## Run
+## Install Pastey
 
-Start a Jolt daemon first:
+Pastey requires a running Jolt daemon. The normal path is to install and open
+Jolt Console first, let Console start the local daemon, then open Pastey and
+approve Pastey's scoped `/pastes/*` app session in Jolt Console.
+
+Install or update Pastey from tagged Linux releases:
 
 ```sh
-cd ../jolt
-cargo run -p jolt-node -- start
+curl -fsSL https://raw.githubusercontent.com/alexanderwanyoike/pastey/main/scripts/install-pastey.sh | bash
 ```
 
-Then run Pastey:
+The installer downloads `pastey-x86_64.AppImage` to:
+
+```text
+~/.local/bin/pastey
+```
+
+Check whether a newer release exists:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/alexanderwanyoike/pastey/main/scripts/install-pastey.sh | bash -s -- --check
+```
+
+Install a specific version:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/alexanderwanyoike/pastey/main/scripts/install-pastey.sh | PASTEY_VERSION=v0.1.0 bash
+```
+
+Check the installed AppImage:
+
+```sh
+pastey --appimage-help
+```
+
+Packaged Pastey builds also check GitHub Releases for signed in-app updates.
+When a newer signed release is available, Pastey shows an update action in the
+top bar. Installing the update verifies the updater signature, applies the
+AppImage update, and relaunches Pastey.
+
+## Run as a Desktop App
+
+Pastey is desktop-first. Run Jolt Console first and let it start the local Jolt
+daemon. Pastey does not own the daemon lifecycle; it connects to the local daemon
+and asks Jolt Console for scoped `/pastes/*` permission.
+
+Build the desktop app:
 
 ```sh
 cd ../jolt-apps/pastey
 npm install
+npm run desktop:build
+```
+
+The Linux AppImage is written to:
+
+```text
+src-tauri/target/release/bundle/appimage/Pastey_0.1.0_amd64.AppImage
+```
+
+Launch it while Jolt Console is running, then approve Pastey's app session
+request in Jolt Console.
+
+For desktop development:
+
+```sh
+npm run desktop:dev
+```
+
+To target a non-default daemon port:
+
+```sh
+JOLT_DAEMON_URL=http://127.0.0.1:9864 npm run desktop:dev
+```
+
+## Release Packaging
+
+CI builds Linux AppImage artifacts for pull requests and publishes release
+assets for tags:
+
+```text
+pastey-x86_64.AppImage
+pastey-x86_64.AppImage.sha256
+pastey-x86_64.AppImage.sig
+latest.json
+```
+
+Packaged Pastey updates are signed and verified before installation. Pastey
+uses its own updater key, separate from Jolt Console.
+
+## Web Dev Fallback
+
+The Vite web app remains useful for development:
+
+```sh
 npm run dev
 ```
 
@@ -27,7 +111,14 @@ Open:
 http://127.0.0.1:5174
 ```
 
-By default the Vite proxy forwards `/jolt-api/*` to `http://127.0.0.1:9862/api/v1/*`.
+In web dev mode the Vite proxy forwards:
+
+- `/app/v1/*` to `http://127.0.0.1:9862/app/v1/*`
+- `/api/v1/status` to `http://127.0.0.1:9862/api/v1/status`
+
+Pastey uses the daemon status endpoint only to discover the local identity for
+the initial session request. Publishing, encrypted publishing, decrypting,
+listing, resolving, fetching, and pinning use bearer-token app APIs.
 
 To target a different daemon port:
 
@@ -35,21 +126,58 @@ To target a different daemon port:
 VITE_JOLT_DAEMON_URL=http://127.0.0.1:9864 npm run dev
 ```
 
-## Current Scope
+## Private Paste Demo
 
-Pastey v0 is public-only because Jolt does not yet implement encrypted access control.
+Card 053 can be verified with three local identities:
+
+1. Start Alice, Bob, and Carol daemons with separate data directories and API
+   ports.
+2. Start one Pastey client per daemon, for example:
+
+   ```sh
+   JOLT_DAEMON_URL=http://127.0.0.1:9862 npm run desktop:dev
+   JOLT_DAEMON_URL=http://127.0.0.1:9864 npm run desktop:dev
+   JOLT_DAEMON_URL=http://127.0.0.1:9866 npm run desktop:dev
+   ```
+
+   The Vite fallback can also be used with separate ports:
+
+   ```sh
+   VITE_JOLT_DAEMON_URL=http://127.0.0.1:9862 npm run dev -- --port 5174
+   VITE_JOLT_DAEMON_URL=http://127.0.0.1:9864 npm run dev -- --port 5175
+   VITE_JOLT_DAEMON_URL=http://127.0.0.1:9866 npm run dev -- --port 5176
+   ```
+
+3. Approve each Pastey session in Jolt Console.
+4. In Bob's Pastey, copy Bob's local identity address.
+5. In Alice's Pastey, choose `Encrypted`, paste Bob's `.jolt` identity into
+   recipients, write a paste, and publish it.
+6. Open Alice's paste address in Bob's Pastey with `Encrypted` selected. Bob
+   should read the plaintext.
+7. Open the same address in Carol's Pastey with `Encrypted` selected. Carol
+   should fetch ciphertext but see a decryption failure.
+
+Relays and caches only handle encrypted object bytes; plaintext is returned by
+the local daemon only after capability and recipient-key checks pass.
+
+## Current Scope
 
 Supported:
 
 - show local daemon status
+- request and use a scoped app session
 - publish text under `/pastes/{slug}`
+- publish encrypted text under `/pastes/{slug}` for recipient `.jolt` identities
 - list local published paste paths
 - fetch by `.jolt` address or CID
+- decrypt encrypted paste addresses through the local daemon
 - pin local paste content to the configured home relay
 
 Not yet supported:
 
-- app sessions
-- private encrypted pastes
-- sharing with recipient identities
+- editing recipient access after publish
 - local key management UI
+
+Pinning is optional. Publishing, opening public pastes, and opening private
+pastes do not require a home relay. If a home relay is configured in Jolt, Pastey
+can ask Jolt to pin local paste content for availability.

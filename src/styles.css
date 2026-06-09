@@ -130,6 +130,24 @@ pre {
   place-items: center;
 }
 
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.update-button {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  background: var(--blue-soft);
+}
+
 .hero {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
@@ -187,6 +205,57 @@ pre {
   background: var(--blue-soft);
 }
 
+.session-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.9fr) auto;
+  align-items: center;
+  gap: 16px;
+  margin: 18px 0;
+  padding: 14px;
+  border: 2px solid var(--ink);
+  background: var(--gold-soft);
+  box-shadow: 4px 4px 0 var(--ink);
+}
+
+.session-panel.active {
+  background: var(--green-soft);
+}
+
+.session-panel.rejected,
+.session-panel.revoked,
+.session-panel.expired {
+  background: var(--red-soft);
+}
+
+.session-panel h2 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+}
+
+.session-panel code,
+.session-authority small,
+.session-authority span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.session-panel code,
+.session-authority small {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.session-authority span {
+  margin-bottom: 4px;
+  font-weight: 900;
+}
+
+.session-panel button {
+  min-height: 38px;
+  padding: 0 12px;
+  font-weight: 900;
+}
+
 .toast {
   display: flex;
   align-items: center;
@@ -207,6 +276,28 @@ pre {
 }
 
 .toast.err {
+  background: var(--red-soft);
+}
+
+.inline-message {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--ink);
+  color: var(--ink);
+  font-size: 0.88rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.inline-message.ok {
+  background: var(--green-soft);
+}
+
+.inline-message.warn {
+  background: var(--gold-soft);
+}
+
+.inline-message.err {
   background: var(--red-soft);
 }
 
@@ -299,6 +390,32 @@ pre {
   gap: 12px;
 }
 
+.mode-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 4px;
+  border: 2px solid var(--ink);
+  background: var(--paper);
+}
+
+.mode-switch button {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-width: 1px;
+  font-size: 0.82rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.mode-switch button.selected {
+  background: var(--ink);
+  color: var(--surface);
+}
+
 label {
   display: grid;
   gap: 6px;
@@ -332,6 +449,28 @@ textarea {
   resize: vertical;
   padding: 12px;
   line-height: 1.45;
+}
+
+.recipient-input {
+  min-height: 82px;
+}
+
+.recipient-field > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.recipient-field small {
+  padding: 3px 7px;
+  border: 1px solid var(--ink);
+  background: var(--gold-soft);
+  color: var(--ink);
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .path-preview {
@@ -391,6 +530,10 @@ textarea {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
+.open-form .mode-switch {
+  grid-column: 1 / -1;
+}
+
 .fetched {
   display: grid;
   gap: 12px;
@@ -425,6 +568,16 @@ textarea {
   font-size: 0.9rem;
   line-height: 1.5;
   white-space: pre-wrap;
+}
+
+.decrypt-note {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--ink);
+  background: var(--red-soft);
+  color: var(--ink);
+  font-size: 0.88rem;
+  font-weight: 800;
 }
 
 .fetched footer {
@@ -544,6 +697,7 @@ textarea {
   }
 
   .hero,
+  .session-panel,
   .workspace,
   .open-form {
     grid-template-columns: 1fr;

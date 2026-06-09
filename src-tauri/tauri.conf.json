@@ -1,0 +1,39 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Pastey",
+  "version": "0.1.0",
+  "identifier": "net.jolt.pastey",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:5174",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Pastey",
+        "width": 1180,
+        "height": 780,
+        "minWidth": 920,
+        "minHeight": 680
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["appimage"],
+    "icon": ["icons/icon.png"]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlBQ0FDMzFDRTFFNEIxQjAKUldTd3NlVGhITVBLbXBJZFhxQnpyVnFFYnh0WDVXTGJlMVRQOTV1QWtNaExqMzdqMzRpVkROeEMK",
+      "endpoints": [
+        "https://github.com/alexanderwanyoike/pastey/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

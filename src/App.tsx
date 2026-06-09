@@ -7,6 +7,7 @@ import {
   ExternalLink,
   KeyRound,
   Link2,
+  Lock,
   Loader2,
   Pin,
   RadioTower,
@@ -19,20 +20,38 @@ import {
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
+  decodePrivateOpen,
   decodeFetchData,
   apiErrorMessage,
   fetchTarget,
+  getCurrentSession,
+  getSessionRequestStatus,
   getStatus,
+  isMissingAppSessionRequestError,
   listPublished,
+  openPrivatePaste,
   pinHomeRelay,
+  publishPrivatePaste,
   publishPaste,
+  requestPasteySession,
+  PASTEY_CAPABILITIES,
   resolveAddress,
+  type AppSessionRequestResponse,
+  type AppSessionStatus,
+  type AppSessionStatusResponse,
+  type CurrentAppSession,
   type FetchResult,
   type NodeStatus,
+  type OpenPrivateResponse,
   type PublishedContent,
   type PublishResponse,
   type ResolveResponse
 } from "./api";
+import {
+  tauriPasteyUpdateClient,
+  type PasteyUpdateCheck,
+  type PasteyUpdateClient
+} from "./update/client";
 
 type Toast = {
   tone: "ok" | "warn" | "err";
@@ -44,10 +63,37 @@ type FetchedPaste = {
   text: string;
   contentId: string;
   size: number;
+  visibility: PasteVisibility;
+  status: "public" | "decrypted" | "ciphertext";
+  message?: string;
   resolved?: ResolveResponse;
 };
 
+type PasteVisibility = "public" | "private";
+
+type LatestPublish = PublishResponse & {
+  visibility: PasteVisibility;
+  recipientCount?: number;
+};
+
 const PASTE_PREFIX = "/pastes/";
+const SESSION_STORAGE_KEY = "pastey.appSession";
+let sessionRequestInFlight: Promise<AppSessionRequestResponse> | null = null;
+
+type StoredSession = {
+  requestId: string;
+  token?: string | null;
+  identity?: string | null;
+};
+
+type PasteySession = {
+  status: AppSessionStatus | "checking";
+  requestId?: string;
+  token?: string | null;
+  identity?: string | null;
+  capabilities: string[];
+  message: string;
+};
 
 function slugify(value: string) {
   return value
@@ -82,19 +128,111 @@ function defaultSlug() {
   return `note-${stamp}`;
 }
 
+function parseRecipients(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split(/[\s,]+/)
+        .map((recipient) => recipient.trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+function hasPasteyCapabilities(capabilities: string[]) {
+  return PASTEY_CAPABILITIES.every((capability) => capabilities.includes(capability));
+}
+
+function loadStoredSession(): StoredSession | null {
+  try {
+    const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as StoredSession) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveStoredSession(session: StoredSession) {
+  window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+}
+
+function clearStoredSession() {
+  window.localStorage.removeItem(SESSION_STORAGE_KEY);
+}
+
+async function requestPasteySessionOnce(identity: string | null) {
+  if (!sessionRequestInFlight) {
+    sessionRequestInFlight = requestPasteySession(identity).finally(() => {
+      sessionRequestInFlight = null;
+    });
+  }
+  return sessionRequestInFlight;
+}
+
+function sessionFromStatus(response: AppSessionStatusResponse): PasteySession {
+  const messageByStatus: Record<AppSessionStatus, string> = {
+    pending: "Waiting for approval in Jolt Console.",
+    active: "Approved. Pastey can use scoped Jolt app APIs.",
+    rejected: "Permission was rejected in Jolt Console.",
+    revoked: "Session was revoked in Jolt Console.",
+    expired: "Session expired. Request permission again."
+  };
+
+  return {
+    status: response.status,
+    requestId: response.request_id,
+    token: response.session_token,
+    identity: response.identity ?? response.requested_identity,
+    capabilities: response.capabilities,
+    message: messageByStatus[response.status]
+  };
+}
+
+function sessionFromCurrent(current: CurrentAppSession, token: string): PasteySession {
+  return {
+    status: current.status,
+    requestId: current.request_id,
+    token,
+    identity: current.identity,
+    capabilities: current.granted_capabilities,
+    message: "Approved. Pastey can use scoped Jolt app APIs."
+  };
+}
+
 export function App() {
   const [status, setStatus] = useState<NodeStatus | null>(null);
   const [published, setPublished] = useState<PublishedContent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [session, setSession] = useState<PasteySession>({
+    status: "checking",
+    capabilities: [],
+    message: "Checking Pastey app session."
+  });
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
+  const [composeNotice, setComposeNotice] = useState<Toast | null>(null);
   const [title, setTitle] = useState(defaultSlug());
   const [paste, setPaste] = useState("");
+  const [pasteVisibility, setPasteVisibility] = useState<PasteVisibility>("public");
+  const [recipientInput, setRecipientInput] = useState("");
   const [target, setTarget] = useState("");
-  const [latestPublish, setLatestPublish] = useState<PublishResponse | null>(null);
+  const [openVisibility, setOpenVisibility] = useState<PasteVisibility>("public");
+  const [latestPublish, setLatestPublish] = useState<LatestPublish | null>(null);
   const [fetched, setFetched] = useState<FetchedPaste | null>(null);
+  const [privatePaths, setPrivatePaths] = useState<Set<string>>(() => new Set());
+  const [updateCheck, setUpdateCheck] = useState<PasteyUpdateCheck | null>(null);
+  const [updateAction, setUpdateAction] = useState<"check" | "install" | null>(null);
+  const updateClient: PasteyUpdateClient = tauriPasteyUpdateClient;
 
   const pastePath = useMemo(() => `${PASTE_PREFIX}${slugify(title) || "untitled"}`, [title]);
+  const recipientCount = useMemo(() => parseRecipients(recipientInput).length, [recipientInput]);
+  const sessionToken = session.status === "active" ? session.token || null : null;
+  const blockedActionLabel =
+    session.status === "pending"
+      ? "Waiting for approval"
+      : session.status === "checking"
+        ? "Checking session"
+        : "Session unavailable";
   const pasteItems = useMemo(
     () =>
       published
@@ -103,12 +241,111 @@ export function App() {
     [published]
   );
 
+  async function syncSession(identity: string | null): Promise<string | null> {
+    const stored = loadStoredSession();
+
+    if (stored?.token) {
+      try {
+        const current = await getCurrentSession(stored.token);
+        if (current.status === "active" && hasPasteyCapabilities(current.granted_capabilities)) {
+          const activeSession = sessionFromCurrent(current, stored.token);
+          saveStoredSession({
+            requestId: current.request_id,
+            token: stored.token,
+            identity: current.identity
+          });
+          setSession(activeSession);
+          return stored.token;
+        }
+        if (current.status === "active") {
+          clearStoredSession();
+        }
+      } catch {
+        // Fall through to request polling; revoked tokens are expected to fail here.
+      }
+    }
+
+    if (stored?.requestId) {
+      try {
+        const nextResponse = await getSessionRequestStatus(stored.requestId);
+        const nextSession = sessionFromStatus(nextResponse);
+        if (
+          nextSession.status === "active" &&
+          nextSession.token &&
+          hasPasteyCapabilities(nextSession.capabilities)
+        ) {
+          saveStoredSession({
+            requestId: nextResponse.request_id,
+            token: nextSession.token,
+            identity: nextSession.identity
+          });
+          setSession(nextSession);
+          return nextSession.token;
+        }
+        if (nextSession.status === "active") {
+          clearStoredSession();
+          setSession({
+            status: "checking",
+            capabilities: [],
+            message: "Requesting updated Pastey private paste permissions."
+          });
+          return syncSession(identity);
+        }
+        saveStoredSession({ requestId: nextResponse.request_id, identity: nextSession.identity });
+        setSession(nextSession);
+        return null;
+      } catch (error) {
+        if (!isMissingAppSessionRequestError(error)) {
+          throw error;
+        }
+        clearStoredSession();
+      }
+    }
+
+    if (!identity) {
+      setSession({
+        status: "checking",
+        capabilities: [],
+        message: "Requesting Pastey permissions for the local Jolt identity."
+      });
+    }
+
+    const requested = await requestPasteySessionOnce(identity);
+    saveStoredSession({ requestId: requested.request_id, identity });
+    setSession({
+      status: requested.status,
+      requestId: requested.request_id,
+      identity,
+      capabilities: [],
+      message: "Waiting for approval in Jolt Console."
+    });
+    return null;
+  }
+
   async function refresh() {
     try {
-      const [nextStatus, nextPublished] = await Promise.all([getStatus(), listPublished()]);
-      setStatus(nextStatus);
+      const stored = loadStoredSession();
+      let token = await syncSession(status?.identity_address ?? session.identity ?? stored?.identity ?? null);
+      let nextStatus: NodeStatus | null = null;
+      let statusError: unknown = null;
+
+      try {
+        nextStatus = await getStatus();
+        setStatus(nextStatus);
+      } catch (error) {
+        statusError = error;
+      }
+
+      if (!token && nextStatus) {
+        token = await syncSession(nextStatus.identity_address);
+      }
+      const nextPublished = token ? await listPublished(token) : [];
       setPublished(nextPublished);
-      setToast(null);
+      if (!token && !loadStoredSession()?.requestId && statusError) {
+        setToast({ tone: "err", message: apiErrorMessage(statusError) });
+      } else {
+        setToast(null);
+      }
     } catch (error) {
       setToast({ tone: "err", message: apiErrorMessage(error) });
     } finally {
@@ -122,22 +359,81 @@ export function App() {
     return () => window.clearInterval(interval);
   }, []);
 
+  async function requestNewSession() {
+    const identity = session.identity ?? status?.identity_address ?? loadStoredSession()?.identity ?? null;
+    clearStoredSession();
+    setSession({
+      status: "checking",
+      identity,
+      capabilities: [],
+      message: "Requesting a new Pastey app session."
+    });
+    if (identity) {
+      const requested = await requestPasteySessionOnce(identity);
+      saveStoredSession({ requestId: requested.request_id, identity });
+      setSession({
+        status: requested.status,
+        requestId: requested.request_id,
+        identity,
+        capabilities: [],
+        message: "Waiting for approval in Jolt Console."
+      });
+      return;
+    }
+    const requested = await requestPasteySessionOnce(null);
+    saveStoredSession({ requestId: requested.request_id, identity: null });
+    setSession({
+      status: requested.status,
+      requestId: requested.request_id,
+      identity: null,
+      capabilities: [],
+      message: "Waiting for approval in Jolt Console."
+    });
+  }
+
   async function onPublish(event: FormEvent) {
     event.preventDefault();
+    if (!sessionToken) {
+      setToast({ tone: "warn", message: "Approve Pastey in Jolt Console before publishing." });
+      setComposeNotice({ tone: "warn", message: "Approve Pastey in Jolt Console before publishing." });
+      return;
+    }
     if (!paste.trim()) {
       setToast({ tone: "warn", message: "Write a paste before publishing." });
+      setComposeNotice({ tone: "warn", message: "Write a paste before publishing." });
       return;
     }
 
     setBusy("publish");
+    setComposeNotice(null);
     try {
-      const response = await publishPaste(pastePath, paste);
-      setLatestPublish(response);
+      const recipients = parseRecipients(recipientInput);
+      const response = await (pasteVisibility === "private"
+        ? publishPrivatePaste(sessionToken, pastePath, paste, recipients)
+        : publishPaste(sessionToken, pastePath, paste));
+      const recipientCount =
+        "recipient_count" in response && typeof response.recipient_count === "number"
+          ? response.recipient_count
+          : undefined;
+      setLatestPublish({ ...response, visibility: pasteVisibility, recipientCount });
       setTarget(response.address || response.content_id);
-      setToast({ tone: "ok", message: "Paste published and signed by the local Jolt identity." });
+      if (pasteVisibility === "private") {
+        setPrivatePaths((current) => new Set(current).add(pastePath));
+      }
+      setToast({
+        tone: "ok",
+        message:
+          pasteVisibility === "private"
+            ? recipients.length === 0
+              ? "Self-only encrypted paste published. Relays only see ciphertext."
+              : "Encrypted paste published. Relays only see ciphertext."
+            : "Paste published and signed by the local Jolt identity."
+      });
       await refresh();
     } catch (error) {
-      setToast({ tone: "err", message: apiErrorMessage(error) });
+      const message = apiErrorMessage(error);
+      setToast({ tone: "err", message });
+      setComposeNotice({ tone: "err", message });
     } finally {
       setBusy(null);
     }
@@ -145,6 +441,10 @@ export function App() {
 
   async function onOpenTarget(event?: FormEvent, nextTarget = target) {
     event?.preventDefault();
+    if (!sessionToken) {
+      setToast({ tone: "warn", message: "Approve Pastey in Jolt Console before opening pastes." });
+      return;
+    }
     if (!nextTarget.trim()) {
       setToast({ tone: "warn", message: "Enter a .jolt address or CID." });
       return;
@@ -152,16 +452,43 @@ export function App() {
 
     setBusy("fetch");
     try {
+      if (openVisibility === "private") {
+        if (!nextTarget.includes(".jolt")) {
+          setToast({ tone: "warn", message: "Encrypted paste decrypt needs a .jolt paste address." });
+          return;
+        }
+        const opened: OpenPrivateResponse = await openPrivatePaste(sessionToken, nextTarget.trim());
+        const decrypted = opened.status === "decrypted";
+        setFetched({
+          target: nextTarget.trim(),
+          text: decodePrivateOpen(opened),
+          contentId: opened.content_id,
+          size: opened.size,
+          visibility: "private",
+          status: decrypted ? "decrypted" : "ciphertext",
+          message: decrypted ? undefined : opened.decrypt_error || "This daemon cannot decrypt this paste."
+        });
+        setToast({
+          tone: decrypted ? "ok" : "err",
+          message: decrypted
+            ? "Encrypted paste opened and decrypted by the daemon."
+            : "Encrypted bytes fetched. This daemon cannot decrypt them."
+        });
+        return;
+      }
+
       let resolved: ResolveResponse | undefined;
       if (nextTarget.includes(".jolt")) {
-        resolved = await resolveAddress(nextTarget.trim());
+        resolved = await resolveAddress(sessionToken, nextTarget.trim());
       }
-      const result: FetchResult = await fetchTarget(nextTarget.trim());
+      const result: FetchResult = await fetchTarget(sessionToken, nextTarget.trim());
       setFetched({
         target: nextTarget.trim(),
         text: decodeFetchData(result),
         contentId: result.content_id,
         size: result.size,
+        visibility: "public",
+        status: "public",
         resolved
       });
       setToast({ tone: "ok", message: "Fetched and verified content from Jolt." });
@@ -179,15 +506,47 @@ export function App() {
   }
 
   async function onPin(item: PublishedContent) {
+    if (!sessionToken) {
+      setToast({ tone: "warn", message: "Approve Pastey in Jolt Console before pinning." });
+      return;
+    }
     setBusy(`pin:${item.content_id}`);
     try {
-      await pinHomeRelay(item.content_id, item.path);
+      await pinHomeRelay(sessionToken, item.content_id, item.path);
       setToast({ tone: "ok", message: "Home relay pin requested." });
       await refresh();
     } catch (error) {
       setToast({ tone: "err", message: apiErrorMessage(error) });
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function checkPasteyUpdate() {
+    setUpdateAction("check");
+    try {
+      const nextUpdateCheck = await updateClient.check();
+      setUpdateCheck(nextUpdateCheck);
+      setToast({
+        tone: nextUpdateCheck.available ? "ok" : "warn",
+        message: nextUpdateCheck.available
+          ? `Update available: ${nextUpdateCheck.version}`
+          : "Pastey is up to date."
+      });
+    } catch (error) {
+      setToast({ tone: "err", message: apiErrorMessage(error) });
+    } finally {
+      setUpdateAction(null);
+    }
+  }
+
+  async function installPasteyUpdate() {
+    setUpdateAction("install");
+    try {
+      await updateClient.installAndRelaunch();
+    } catch (error) {
+      setToast({ tone: "err", message: apiErrorMessage(error) });
+      setUpdateAction(null);
     }
   }
 
@@ -200,10 +559,31 @@ export function App() {
           </div>
           <div>
             <p>Pastey</p>
-            <span>Public paste tool over Jolt</span>
+            <span>Public and encrypted pastes over Jolt</span>
           </div>
         </div>
         <div className="top-actions">
+          {updateCheck?.available ? (
+            <button
+              type="button"
+              className="update-button"
+              onClick={installPasteyUpdate}
+              disabled={updateAction !== null}
+            >
+              {updateAction === "install" ? <Loader2 className="spin" size={16} /> : <ArrowDownToLine size={16} />}
+              Update available
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="icon-button"
+            onClick={checkPasteyUpdate}
+            disabled={updateAction !== null}
+            aria-label="Check for Pastey updates"
+            title="Check for Pastey updates"
+          >
+            {updateAction === "check" ? <Loader2 className="spin" size={18} /> : <ArrowDownToLine size={18} />}
+          </button>
           <button type="button" className="icon-button" onClick={refresh} aria-label="Refresh">
             {loading ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
           </button>
@@ -217,12 +597,15 @@ export function App() {
         </div>
         <div className="hero-status">
           <StatusPill ok={Boolean(status)} label={status ? "daemon online" : "daemon offline"} />
+          <StatusPill ok={Boolean(sessionToken)} label={`session ${session.status}`} />
           <StatusPill
             ok={Boolean(status?.home_relay)}
             label={status?.home_relay ? "home relay set" : "no home relay"}
           />
         </div>
       </section>
+
+      <SessionPanel session={session} onRequestAgain={requestNewSession} busy={loading} />
 
       {toast && (
         <div className={`toast ${toast.tone}`} role="status">
@@ -266,7 +649,7 @@ export function App() {
 
           <div className="note">
             <ShieldCheck size={18} />
-            <p>Pastey never handles keys. It asks the local Jolt daemon to publish and fetch.</p>
+            <p>Pastey never handles keys. It uses a scoped app session approved in Jolt Console.</p>
           </div>
         </aside>
 
@@ -276,6 +659,11 @@ export function App() {
             <h2>New Paste</h2>
           </div>
           <form onSubmit={onPublish} className="compose-form">
+            <ModeSwitch
+              value={pasteVisibility}
+              onChange={setPasteVisibility}
+              labels={{ public: "Public", private: "Encrypted" }}
+            />
             <label>
               <span>Path</span>
               <input value={title} onChange={(event) => setTitle(event.target.value)} />
@@ -284,26 +672,60 @@ export function App() {
               <Link2 size={15} />
               <code>{pastePath}</code>
             </div>
+            {pasteVisibility === "private" ? (
+              <label className="recipient-field">
+                <span>
+                  Recipients
+                  <small>{recipientCount === 0 ? "private to me" : `${recipientCount} external`}</small>
+                </span>
+                <textarea
+                  className="recipient-input"
+                  value={recipientInput}
+                  onChange={(event) => setRecipientInput(event.target.value)}
+                  spellCheck={false}
+                  placeholder={"Leave empty for a self-only private paste\nbobidentity.jolt\ncarolidentity.jolt"}
+                />
+              </label>
+            ) : null}
             <label>
               <span>Text</span>
               <textarea
                 value={paste}
                 onChange={(event) => setPaste(event.target.value)}
                 spellCheck={false}
-                placeholder="Paste a command, config snippet, canary note, or anything public..."
+                placeholder={
+                  pasteVisibility === "private"
+                    ? "Write a paste that only listed recipients and this identity can decrypt..."
+                    : "Paste a command, config snippet, canary note, or anything public..."
+                }
               />
             </label>
-            <button className="primary-button" type="submit" disabled={busy === "publish"}>
+            <button className="primary-button" type="submit" disabled={busy === "publish" || !sessionToken}>
               {busy === "publish" ? <Loader2 className="spin" size={18} /> : <Send size={18} />}
-              Publish paste
+              {sessionToken
+                ? pasteVisibility === "private"
+                  ? "Publish encrypted paste"
+                  : "Publish paste"
+                : blockedActionLabel}
             </button>
           </form>
+
+          {composeNotice ? (
+            <div className={`inline-message ${composeNotice.tone}`} role={composeNotice.tone === "err" ? "alert" : "status"}>
+              {composeNotice.message}
+            </div>
+          ) : null}
 
           {latestPublish && (
             <div className="receipt">
               <div>
-                <strong>Published</strong>
-                <span>{bytes(latestPublish.size)}</span>
+                <strong>{latestPublish.visibility === "private" ? "Encrypted paste" : "Public paste"}</strong>
+                <span>
+                  {bytes(latestPublish.size)}
+                  {latestPublish.recipientCount
+                    ? ` / ${latestPublish.recipientCount} ${latestPublish.recipientCount === 1 ? "recipient" : "recipients"}`
+                    : ""}
+                </span>
               </div>
               <button type="button" onClick={() => copyValue(latestPublish.address)}>
                 <Copy size={16} />
@@ -320,12 +742,17 @@ export function App() {
             <h2>Open Paste</h2>
           </div>
           <form onSubmit={onOpenTarget} className="open-form">
+            <ModeSwitch
+              value={openVisibility}
+              onChange={setOpenVisibility}
+              labels={{ public: "Public", private: "Encrypted" }}
+            />
             <input
               value={target}
               onChange={(event) => setTarget(event.target.value)}
               placeholder="identity.jolt/pastes/name or CID"
             />
-            <button type="submit" disabled={busy === "fetch"}>
+            <button type="submit" disabled={busy === "fetch" || !sessionToken}>
               {busy === "fetch" ? <Loader2 className="spin" size={18} /> : <ExternalLink size={18} />}
               Open
             </button>
@@ -335,7 +762,13 @@ export function App() {
             <article className="fetched">
               <header>
                 <div>
-                  <span>Verified content</span>
+                  <span>
+                    {fetched.status === "decrypted"
+                      ? "Decrypted private paste"
+                      : fetched.status === "ciphertext"
+                        ? "Encrypted bytes fetched"
+                        : "Verified public content"}
+                  </span>
                   <strong>{bytes(fetched.size)}</strong>
                 </div>
                 <button type="button" onClick={() => copyValue(fetched.text)} aria-label="Copy fetched text">
@@ -343,6 +776,7 @@ export function App() {
                 </button>
               </header>
               <pre>{fetched.text}</pre>
+              {fetched.message ? <p className="decrypt-note">{fetched.message}</p> : null}
               <footer>
                 <code>{short(fetched.contentId, 16)}</code>
                 {fetched.resolved && <span>seq {fetched.resolved.latest_sequence} from {fetched.resolved.source}</span>}
@@ -375,7 +809,9 @@ export function App() {
                 <header>
                   <div>
                     <strong>{item.path?.replace(PASTE_PREFIX, "") || "untitled"}</strong>
-                    <span>{bytes(item.size)} / seq {item.local_sequence ?? "-"}</span>
+                    <span>
+                      {privatePaths.has(item.path || "") ? "encrypted" : "public or unknown"} / {bytes(item.size)} / seq {item.local_sequence ?? "-"}
+                    </span>
                   </div>
                   <PinState state={item.pin_state} />
                 </header>
@@ -398,7 +834,7 @@ export function App() {
                   </button>
                   <button
                     type="button"
-                    disabled={!status?.home_relay || busy === `pin:${item.content_id}`}
+                    disabled={!sessionToken || !status?.home_relay || busy === `pin:${item.content_id}`}
                     onClick={() => onPin(item)}
                   >
                     {busy === `pin:${item.content_id}` ? <Loader2 className="spin" size={15} /> : <Pin size={15} />}
@@ -420,6 +856,68 @@ function StatusPill({ ok, label }: { ok: boolean; label: string }) {
       {ok ? <CheckCircle2 size={15} /> : <XCircle size={15} />}
       {label}
     </span>
+  );
+}
+
+function ModeSwitch({
+  value,
+  onChange,
+  labels
+}: {
+  value: PasteVisibility;
+  onChange: (value: PasteVisibility) => void;
+  labels: Record<PasteVisibility, string>;
+}) {
+  return (
+    <div className="mode-switch" role="group" aria-label="Paste visibility">
+      {(["public", "private"] as const).map((mode) => (
+        <button
+          key={mode}
+          type="button"
+          className={value === mode ? "selected" : ""}
+          onClick={() => onChange(mode)}
+          aria-pressed={value === mode}
+        >
+          {mode === "private" ? <Lock size={15} /> : <Clipboard size={15} />}
+          {labels[mode]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SessionPanel({
+  session,
+  onRequestAgain,
+  busy
+}: {
+  session: PasteySession;
+  onRequestAgain: () => void;
+  busy: boolean;
+}) {
+  const terminalState = ["rejected", "revoked", "expired"].includes(session.status);
+
+  return (
+    <section className={`session-panel ${session.status}`}>
+      <div>
+        <p className="eyebrow">App session</p>
+        <h2>{session.message}</h2>
+        {session.requestId ? <code>{session.requestId}</code> : null}
+      </div>
+      <div className="session-authority">
+        {session.identity ? <span>{short(session.identity, 16)}</span> : null}
+        {session.capabilities.length > 0 ? (
+          <small>{session.capabilities.join(" / ")}</small>
+        ) : (
+          <small>resolve, fetch, publish, encrypted publish/decrypt, inventory, and pin under /pastes/*</small>
+        )}
+      </div>
+      {terminalState ? (
+        <button type="button" onClick={onRequestAgain} disabled={busy}>
+          Request again
+        </button>
+      ) : null}
+    </section>
   );
 }
 
