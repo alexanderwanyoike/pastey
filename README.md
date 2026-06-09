@@ -97,22 +97,10 @@ latest.json
 The tag workflow signs update artifacts with a Pastey-specific Tauri updater
 key. Pastey must not reuse Jolt Console's updater signing key.
 
-Required GitHub repository secrets:
-
-```text
-TAURI_SIGNING_PRIVATE_KEY
-TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-```
-
-`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` can be omitted when the key was generated
-without a password. Generate a new keypair with:
-
-```sh
-npm exec tauri signer generate -- --write-keys ~/.config/pastey/updater.key
-```
-
-Commit only the generated public key in `src-tauri/tauri.conf.json`; store the
-private key value in the GitHub secret.
+Release signing is configured through private repository automation settings.
+Do not commit or document private signing key material. The public updater key
+is committed in `src-tauri/tauri.conf.json` so installed apps can verify signed
+updates.
 
 ## Web Dev Fallback
 

@@ -61,7 +61,7 @@ const requiredMarkers = {
     "curl -fsSL",
     "scripts/install-pastey.sh",
     "Jolt Console",
-    "TAURI_SIGNING_PRIVATE_KEY",
+    "Do not commit or document private signing key material",
     "pastey --appimage-help"
   ]
 };
