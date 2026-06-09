@@ -94,13 +94,8 @@ pastey-x86_64.AppImage.sig
 latest.json
 ```
 
-The tag workflow signs update artifacts with a Pastey-specific Tauri updater
-key. Pastey must not reuse Jolt Console's updater signing key.
-
-Release signing is configured through private repository automation settings.
-Do not commit or document private signing key material. The public updater key
-is committed in `src-tauri/tauri.conf.json` so installed apps can verify signed
-updates.
+Packaged Pastey updates are signed and verified before installation. Pastey
+uses its own updater key, separate from Jolt Console.
 
 ## Web Dev Fallback
 

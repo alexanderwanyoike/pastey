@@ -61,7 +61,7 @@ const requiredMarkers = {
     "curl -fsSL",
     "scripts/install-pastey.sh",
     "Jolt Console",
-    "Do not commit or document private signing key material",
+    "Packaged Pastey updates are signed and verified before installation",
     "pastey --appimage-help"
   ]
 };
