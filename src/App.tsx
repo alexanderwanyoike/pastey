@@ -318,14 +318,26 @@ export function App() {
     try {
       const stored = loadStoredSession();
       let token = await syncSession(status?.identity_address ?? session.identity ?? stored?.identity ?? null);
-      const nextStatus = await getStatus();
-      if (!token) {
+      let nextStatus: NodeStatus | null = null;
+      let statusError: unknown = null;
+
+      try {
+        nextStatus = await getStatus();
+        setStatus(nextStatus);
+      } catch (error) {
+        statusError = error;
+      }
+
+      if (!token && nextStatus) {
         token = await syncSession(nextStatus.identity_address);
       }
       const nextPublished = token ? await listPublished(token) : [];
-      setStatus(nextStatus);
       setPublished(nextPublished);
-      setToast(null);
+      if (!token && !loadStoredSession()?.requestId && statusError) {
+        setToast({ tone: "err", message: apiErrorMessage(statusError) });
+      } else {
+        setToast(null);
+      }
     } catch (error) {
       setToast({ tone: "err", message: apiErrorMessage(error) });
     } finally {
