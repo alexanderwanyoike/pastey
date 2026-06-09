@@ -68,6 +68,27 @@ describe("Pastey daemon API client", () => {
     );
   });
 
+  it("can request Pastey permissions for the local identity before the address is known", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse({ request_id: "req_1", status: "pending" })
+    );
+
+    await requestPasteySession(null);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/app/v1/sessions/request",
+      expect.objectContaining({
+        body: JSON.stringify({
+          app_id: "pastey.local",
+          app_name: "Pastey",
+          app_origin: "http://127.0.0.1:5174",
+          requested_identity: null,
+          requested_capabilities: PASTEY_CAPABILITIES
+        })
+      })
+    );
+  });
+
   it("uses the daemon status endpoint only for local identity discovery", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ identity_address: "alice.jolt" }));
 

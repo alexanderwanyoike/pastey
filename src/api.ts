@@ -255,7 +255,7 @@ export function getStatus() {
   return request<NodeStatus>(DAEMON_API_BASE, "/status");
 }
 
-export function requestPasteySession(identity: string) {
+export function requestPasteySession(identity: string | null) {
   const appOrigin =
     typeof window === "undefined" ? PASTEY_APP_ORIGIN : window.location.origin;
 

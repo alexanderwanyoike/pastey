@@ -155,7 +155,7 @@ function clearStoredSession() {
   window.localStorage.removeItem(SESSION_STORAGE_KEY);
 }
 
-async function requestPasteySessionOnce(identity: string) {
+async function requestPasteySessionOnce(identity: string | null) {
   if (!sessionRequestInFlight) {
     sessionRequestInFlight = requestPasteySession(identity).finally(() => {
       sessionRequestInFlight = null;
@@ -298,9 +298,8 @@ export function App() {
       setSession({
         status: "checking",
         capabilities: [],
-        message: "Waiting for the local Jolt identity before requesting Pastey permissions."
+        message: "Requesting Pastey permissions for the local Jolt identity."
       });
-      return null;
     }
 
     const requested = await requestPasteySessionOnce(identity);
@@ -361,7 +360,15 @@ export function App() {
       });
       return;
     }
-    await refresh();
+    const requested = await requestPasteySessionOnce(null);
+    saveStoredSession({ requestId: requested.request_id, identity: null });
+    setSession({
+      status: requested.status,
+      requestId: requested.request_id,
+      identity: null,
+      capabilities: [],
+      message: "Waiting for approval in Jolt Console."
+    });
   }
 
   async function onPublish(event: FormEvent) {
