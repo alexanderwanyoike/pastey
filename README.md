@@ -6,6 +6,47 @@ It is intentionally separate from the Jolt protocol repo. Pastey talks to a
 local Jolt daemon through a scoped app session and uses `.jolt` paths under
 `/pastes`.
 
+## Install Pastey
+
+Pastey requires a running Jolt daemon. The normal path is to install and open
+Jolt Console first, let Console start the local daemon, then open Pastey and
+approve Pastey's scoped `/pastes/*` app session in Jolt Console.
+
+Install or update Pastey from tagged Linux releases:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/alexanderwanyoike/pastey/main/scripts/install-pastey.sh | bash
+```
+
+The installer downloads `pastey-x86_64.AppImage` to:
+
+```text
+~/.local/bin/pastey
+```
+
+Check whether a newer release exists:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/alexanderwanyoike/pastey/main/scripts/install-pastey.sh | bash -s -- --check
+```
+
+Install a specific version:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/alexanderwanyoike/pastey/main/scripts/install-pastey.sh | PASTEY_VERSION=v0.1.0 bash
+```
+
+Check the installed AppImage:
+
+```sh
+pastey --appimage-help
+```
+
+Packaged Pastey builds also check GitHub Releases for signed in-app updates.
+When a newer signed release is available, Pastey shows an update action in the
+top bar. Installing the update verifies the updater signature, applies the
+AppImage update, and relaunches Pastey.
+
 ## Run as a Desktop App
 
 Pastey is desktop-first. Run Jolt Console first and let it start the local Jolt
@@ -40,6 +81,38 @@ To target a non-default daemon port:
 ```sh
 JOLT_DAEMON_URL=http://127.0.0.1:9864 npm run desktop:dev
 ```
+
+## Release Packaging
+
+CI builds Linux AppImage artifacts for pull requests and publishes release
+assets for tags:
+
+```text
+pastey-x86_64.AppImage
+pastey-x86_64.AppImage.sha256
+pastey-x86_64.AppImage.sig
+latest.json
+```
+
+The tag workflow signs update artifacts with a Pastey-specific Tauri updater
+key. Pastey must not reuse Jolt Console's updater signing key.
+
+Required GitHub repository secrets:
+
+```text
+TAURI_SIGNING_PRIVATE_KEY
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+```
+
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` can be omitted when the key was generated
+without a password. Generate a new keypair with:
+
+```sh
+npm exec tauri signer generate -- --write-keys ~/.config/pastey/updater.key
+```
+
+Commit only the generated public key in `src-tauri/tauri.conf.json`; store the
+private key value in the GitHub secret.
 
 ## Web Dev Fallback
 

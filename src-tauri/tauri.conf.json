@@ -27,5 +27,13 @@
     "active": true,
     "targets": ["appimage"],
     "icon": ["icons/icon.png"]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlBQ0FDMzFDRTFFNEIxQjAKUldTd3NlVGhITVBLbXBJZFhxQnpyVnFFYnh0WDVXTGJlMVRQOTV1QWtNaExqMzdqMzRpVkROeEMK",
+      "endpoints": [
+        "https://github.com/alexanderwanyoike/pastey/releases/latest/download/latest.json"
+      ]
+    }
   }
 }
