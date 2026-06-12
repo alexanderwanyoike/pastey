@@ -42,10 +42,26 @@ Check the installed AppImage:
 pastey --appimage-help
 ```
 
+macOS and Windows builds are distributed as release assets:
+
+```text
+pastey-aarch64.dmg
+pastey-x86_64-setup.exe
+```
+
+Download the DMG or Windows installer from the latest GitHub Release. The macOS
+DMG currently is not Apple-signed or notarized. If macOS says Pastey is damaged
+and cannot be opened after copying it to Applications, clear the quarantine
+attribute:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/Pastey.app"
+```
+
 Packaged Pastey builds also check GitHub Releases for signed in-app updates.
 When a newer signed release is available, Pastey shows an update action in the
 top bar. Installing the update verifies the updater signature, applies the
-AppImage update, and relaunches Pastey.
+platform update payload, and relaunches Pastey.
 
 ## Run as a Desktop App
 
@@ -84,13 +100,21 @@ JOLT_DAEMON_URL=http://127.0.0.1:9864 npm run desktop:dev
 
 ## Release Packaging
 
-CI builds Linux AppImage artifacts for pull requests and publishes release
-assets for tags:
+CI builds Linux AppImage, macOS DMG, and Windows NSIS artifacts for pull
+requests and publishes release assets for tags:
 
 ```text
 pastey-x86_64.AppImage
 pastey-x86_64.AppImage.sha256
 pastey-x86_64.AppImage.sig
+pastey-aarch64.dmg
+pastey-aarch64.dmg.sha256
+pastey-aarch64.app.tar.gz
+pastey-aarch64.app.tar.gz.sha256
+pastey-aarch64.app.tar.gz.sig
+pastey-x86_64-setup.exe
+pastey-x86_64-setup.exe.sha256
+pastey-x86_64-setup.exe.sig
 latest.json
 ```
 
