@@ -4,6 +4,8 @@ const files = {
   workflow: readFileSync(".github/workflows/package-pastey.yml", "utf8"),
   installer: readFileSync("scripts/install-pastey.sh", "utf8"),
   packageScript: readFileSync("scripts/package-pastey.sh", "utf8"),
+  normalizeArtifacts: readFileSync("scripts/normalize-pastey-artifacts.sh", "utf8"),
+  assembleRelease: readFileSync("scripts/assemble-pastey-release.sh", "utf8"),
   updateManifest: readFileSync("scripts/write-pastey-update-manifest.mjs", "utf8"),
   tauriConfig: readFileSync("src-tauri/tauri.conf.json", "utf8"),
   tauriCargo: readFileSync("src-tauri/Cargo.toml", "utf8"),
@@ -17,12 +19,21 @@ const files = {
 const requiredMarkers = {
   workflow: [
     "Package Pastey",
+    "matrix:",
+    "ubuntu-22.04",
+    "macos-latest",
+    "windows-latest",
     "scripts/package-pastey.sh",
+    "scripts/normalize-pastey-artifacts.sh",
+    "scripts/assemble-pastey-release.sh",
+    "shell: bash",
     "pastey-x86_64.AppImage",
-    "pastey-x86_64.AppImage.sig",
-    "latest.json",
+    "pastey-aarch64.dmg",
+    "pastey-aarch64.app.tar.gz",
+    "pastey-x86_64-setup.exe",
     "write-pastey-update-manifest.mjs",
-    "softprops/action-gh-release"
+    "softprops/action-gh-release",
+    "refs/tags/"
   ],
   installer: [
     "PASTEY_VERSION",
@@ -37,17 +48,62 @@ const requiredMarkers = {
   ],
   packageScript: [
     "target/release/bundle/appimage",
+    "target/release/bundle/dmg",
+    "target/release/bundle/macos",
+    "target/release/bundle/nsis",
+    "BUNDLE_KIND",
+    "--bundle",
     "PASTEY_CREATE_UPDATER_ARTIFACTS",
     "createUpdaterArtifacts",
+    "app,dmg",
     "Prefetching Tauri AppImage helper binaries"
+  ],
+  normalizeArtifacts: [
+    "Normalize Pastey package artifacts",
+    "--bundle",
+    "appimage",
+    "dmg",
+    "nsis",
+    "target/release/bundle/appimage",
+    "target/release/bundle/dmg",
+    "target/release/bundle/macos",
+    "target/release/bundle/nsis",
+    "PASTEY_REQUIRE_UPDATER_ARTIFACTS",
+    "sha256sum",
+    "shasum -a 256"
+  ],
+  assembleRelease: [
+    "Assemble normalized Pastey artifacts",
+    "pastey-x86_64.AppImage",
+    "pastey-x86_64.AppImage.sha256",
+    "pastey-x86_64.AppImage.sig",
+    "pastey-aarch64.dmg",
+    "pastey-aarch64.dmg.sha256",
+    "pastey-aarch64.app.tar.gz",
+    "pastey-aarch64.app.tar.gz.sha256",
+    "pastey-aarch64.app.tar.gz.sig",
+    "pastey-x86_64-setup.exe",
+    "pastey-x86_64-setup.exe.sha256",
+    "pastey-x86_64-setup.exe.sig",
+    "write-pastey-update-manifest.mjs",
+    "latest.json",
+    "linux-x86_64",
+    "darwin-aarch64",
+    "windows-x86_64"
   ],
   updateManifest: [
     "latest.json",
     "linux-x86_64",
+    "darwin-aarch64",
+    "windows-x86_64",
     "signature",
-    "pastey-x86_64.AppImage"
+    "pastey-x86_64.AppImage",
+    "pastey-aarch64.app.tar.gz",
+    "pastey-x86_64-setup.exe"
   ],
   tauriConfig: [
+    "icons/icon.png",
+    "icons/icon.ico",
     "\"updater\"",
     "\"pubkey\"",
     "https://github.com/alexanderwanyoike/pastey/releases/latest/download/latest.json"
@@ -62,7 +118,11 @@ const requiredMarkers = {
     "scripts/install-pastey.sh",
     "Jolt Console",
     "Packaged Pastey updates are signed and verified before installation",
-    "pastey --appimage-help"
+    "pastey --appimage-help",
+    "pastey-aarch64.dmg",
+    "pastey-aarch64.app.tar.gz",
+    "pastey-x86_64-setup.exe",
+    "xattr -dr com.apple.quarantine"
   ]
 };
 
