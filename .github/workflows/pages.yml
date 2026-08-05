@@ -1,0 +1,81 @@
+name: GitHub Pages
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - "website/**"
+      - "scripts/verify-website.sh"
+      - ".github/workflows/pages.yml"
+  push:
+    branches: [main]
+    paths:
+      - "website/**"
+      - "scripts/verify-website.sh"
+      - ".github/workflows/pages.yml"
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify static site
+        run: ./scripts/verify-website.sh
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: verify
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - name: Check the latest release carries the advertised assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          release=$(gh release view --repo "$GITHUB_REPOSITORY" \
+            --json tagName,assets)
+          tag=$(jq -r '.tagName' <<<"$release")
+
+          if [ -z "$tag" ] || [ "$tag" = "null" ]; then
+            echo "::error::No published Pastey release found"
+            exit 1
+          fi
+
+          expected_assets=(
+            pastey-x86_64.AppImage
+            pastey-aarch64.dmg
+            pastey-x86_64-setup.exe
+          )
+          for asset in "${expected_assets[@]}"; do
+            if ! jq -e --arg asset "$asset" '.assets[] | select(.name == $asset)' \
+              <<<"$release" >/dev/null; then
+              echo "::error::Release $tag is missing $asset"
+              exit 1
+            fi
+          done
+
+          echo "Publishing Pastey website; latest release is $tag"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: website
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
