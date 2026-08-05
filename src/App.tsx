@@ -18,7 +18,7 @@ import {
   Terminal,
   XCircle
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   decodePrivateOpen,
   decodeFetchData,
@@ -56,6 +56,10 @@ import {
 type Toast = {
   tone: "ok" | "warn" | "err";
   message: string;
+  // Connectivity toasts come from the background poll and are cleared by it
+  // when the daemon recovers; action toasts belong to the user's last action
+  // and must never be wiped by a background refresh.
+  source?: "connectivity" | "action";
 };
 
 type FetchedPaste = {
@@ -78,7 +82,11 @@ type LatestPublish = PublishResponse & {
 
 const PASTE_PREFIX = "/pastes/";
 const SESSION_STORAGE_KEY = "pastey.appSession";
-let sessionRequestInFlight: Promise<AppSessionRequestResponse> | null = null;
+const PRIVATE_PATHS_STORAGE_KEY = "pastey.privatePaths";
+// Keyed by requested identity so a null-identity request and a real-identity
+// request never share one in-flight promise (StrictMode double-mount defusal
+// must not hand a caller a session requested for the wrong identity).
+const sessionRequestsInFlight = new Map<string | null, Promise<AppSessionRequestResponse>>();
 
 type StoredSession = {
   requestId: string;
@@ -161,12 +169,32 @@ function clearStoredSession() {
 }
 
 async function requestPasteySessionOnce(identity: string | null) {
-  if (!sessionRequestInFlight) {
-    sessionRequestInFlight = requestPasteySession(identity).finally(() => {
-      sessionRequestInFlight = null;
+  let inFlight = sessionRequestsInFlight.get(identity);
+  if (!inFlight) {
+    inFlight = requestPasteySession(identity).finally(() => {
+      sessionRequestsInFlight.delete(identity);
     });
+    sessionRequestsInFlight.set(identity, inFlight);
   }
-  return sessionRequestInFlight;
+  return inFlight;
+}
+
+function loadPrivatePaths(): Set<string> {
+  try {
+    const raw = window.localStorage.getItem(PRIVATE_PATHS_STORAGE_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    return new Set(Array.isArray(parsed) ? parsed.filter((p): p is string => typeof p === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function savePrivatePaths(paths: Set<string>) {
+  try {
+    window.localStorage.setItem(PRIVATE_PATHS_STORAGE_KEY, JSON.stringify([...paths]));
+  } catch {
+    // Best effort: losing the private/public label is cosmetic.
+  }
 }
 
 function sessionFromStatus(response: AppSessionStatusResponse): PasteySession {
@@ -184,7 +212,9 @@ function sessionFromStatus(response: AppSessionStatusResponse): PasteySession {
     token: response.session_token,
     identity: response.identity ?? response.requested_identity,
     capabilities: response.capabilities,
-    message: messageByStatus[response.status]
+    // A newer daemon may report a status this build does not know; degrade to
+    // a readable message instead of a blank heading.
+    message: messageByStatus[response.status] ?? `Session state: ${response.status}.`
   };
 }
 
@@ -219,7 +249,8 @@ export function App() {
   const [openVisibility, setOpenVisibility] = useState<PasteVisibility>("public");
   const [latestPublish, setLatestPublish] = useState<LatestPublish | null>(null);
   const [fetched, setFetched] = useState<FetchedPaste | null>(null);
-  const [privatePaths, setPrivatePaths] = useState<Set<string>>(() => new Set());
+  const [privatePaths, setPrivatePaths] = useState<Set<string>>(loadPrivatePaths);
+  const [refreshing, setRefreshing] = useState(false);
   const [updateCheck, setUpdateCheck] = useState<PasteyUpdateCheck | null>(null);
   const [updateAction, setUpdateAction] = useState<"check" | "install" | null>(null);
   const updateClient: PasteyUpdateClient = tauriPasteyUpdateClient;
@@ -241,7 +272,7 @@ export function App() {
     [published]
   );
 
-  async function syncSession(identity: string | null): Promise<string | null> {
+  async function syncSession(identity: string | null, depth = 0): Promise<string | null> {
     const stored = loadStoredSession();
 
     if (stored?.token) {
@@ -282,14 +313,14 @@ export function App() {
           setSession(nextSession);
           return nextSession.token;
         }
-        if (nextSession.status === "active") {
+        if (nextSession.status === "active" && depth === 0) {
           clearStoredSession();
           setSession({
             status: "checking",
             capabilities: [],
             message: "Requesting updated Pastey private paste permissions."
           });
-          return syncSession(identity);
+          return syncSession(identity, depth + 1);
         }
         saveStoredSession({ requestId: nextResponse.request_id, identity: nextSession.identity });
         setSession(nextSession);
@@ -339,25 +370,71 @@ export function App() {
       if (!token && nextStatus) {
         token = await syncSession(nextStatus.identity_address);
       }
-      const nextPublished = token ? await listPublished(token) : [];
-      setPublished(nextPublished);
-      if (!token && !loadStoredSession()?.requestId && statusError) {
-        setToast({ tone: "err", message: apiErrorMessage(statusError) });
+      // A transient token gap must not blank the inventory; keep the last
+      // good list until a token is available again.
+      if (token) {
+        setPublished(await listPublished(token));
+      }
+      if (statusError) {
+        setToast({ tone: "err", source: "connectivity", message: apiErrorMessage(statusError) });
       } else {
-        setToast(null);
+        // Clear only our own connectivity toast; never wipe the toast a user
+        // action just raised.
+        setToast((current) => (current?.source === "connectivity" ? null : current));
       }
     } catch (error) {
-      setToast({ tone: "err", message: apiErrorMessage(error) });
+      setToast({ tone: "err", source: "connectivity", message: apiErrorMessage(error) });
     } finally {
       setLoading(false);
     }
   }
 
+  // The poll always calls the freshest refresh (no stale closure), never
+  // overlaps itself, and stops on unmount.
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
   useEffect(() => {
-    refresh();
-    const interval = window.setInterval(refresh, 5000);
-    return () => window.clearInterval(interval);
+    let cancelled = false;
+    let inFlight = false;
+    const tick = async () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      try {
+        await refreshRef.current();
+      } finally {
+        inFlight = false;
+      }
+    };
+    void tick();
+    const interval = window.setInterval(() => void tick(), 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
   }, []);
+
+  // Action toasts auto-dismiss; connectivity toasts persist until the daemon
+  // recovers (the poll clears them).
+  useEffect(() => {
+    if (!toast || toast.source === "connectivity") return;
+    const timer = window.setTimeout(() => {
+      setToast((current) => (current === toast ? null : current));
+    }, 6000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  useEffect(() => {
+    savePrivatePaths(privatePaths);
+  }, [privatePaths]);
+
+  async function manualRefresh() {
+    setRefreshing(true);
+    try {
+      await refreshRef.current();
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   async function requestNewSession() {
     const identity = session.identity ?? status?.identity_address ?? loadStoredSession()?.identity ?? null;
@@ -368,7 +445,7 @@ export function App() {
       capabilities: [],
       message: "Requesting a new Pastey app session."
     });
-    if (identity) {
+    try {
       const requested = await requestPasteySessionOnce(identity);
       saveStoredSession({ requestId: requested.request_id, identity });
       setSession({
@@ -378,17 +455,18 @@ export function App() {
         capabilities: [],
         message: "Waiting for approval in Jolt Console."
       });
-      return;
+    } catch (error) {
+      // A failed request must not leave the panel stuck on "Requesting…"
+      // with no way forward.
+      const message = apiErrorMessage(error);
+      setToast({ tone: "err", message });
+      setSession({
+        status: "expired",
+        identity,
+        capabilities: [],
+        message: `Session request failed: ${message}`
+      });
     }
-    const requested = await requestPasteySessionOnce(null);
-    saveStoredSession({ requestId: requested.request_id, identity: null });
-    setSession({
-      status: requested.status,
-      requestId: requested.request_id,
-      identity: null,
-      capabilities: [],
-      message: "Waiting for approval in Jolt Console."
-    });
   }
 
   async function onPublish(event: FormEvent) {
@@ -439,7 +517,7 @@ export function App() {
     }
   }
 
-  async function onOpenTarget(event?: FormEvent, nextTarget = target) {
+  async function onOpenTarget(event?: FormEvent, nextTarget = target, visibility = openVisibility) {
     event?.preventDefault();
     if (!sessionToken) {
       setToast({ tone: "warn", message: "Approve Pastey in Jolt Console before opening pastes." });
@@ -452,7 +530,7 @@ export function App() {
 
     setBusy("fetch");
     try {
-      if (openVisibility === "private") {
+      if (visibility === "private") {
         if (!nextTarget.includes(".jolt")) {
           setToast({ tone: "warn", message: "Encrypted paste decrypt needs a .jolt paste address." });
           return;
@@ -501,8 +579,14 @@ export function App() {
 
   async function copyValue(value?: string | null) {
     if (!value) return;
-    await navigator.clipboard.writeText(value);
-    setToast({ tone: "ok", message: "Copied." });
+    try {
+      await navigator.clipboard.writeText(value);
+      setToast({ tone: "ok", message: "Copied." });
+    } catch {
+      // Clipboard access can be denied (insecure context, webview policy);
+      // tell the user instead of rejecting unhandled.
+      setToast({ tone: "err", message: "Could not access the clipboard." });
+    }
   }
 
   async function onPin(item: PublishedContent) {
@@ -584,8 +668,14 @@ export function App() {
           >
             {updateAction === "check" ? <Loader2 className="spin" size={18} /> : <ArrowDownToLine size={18} />}
           </button>
-          <button type="button" className="icon-button" onClick={refresh} aria-label="Refresh">
-            {loading ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => void manualRefresh()}
+            disabled={refreshing}
+            aria-label="Refresh"
+          >
+            {loading || refreshing ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
           </button>
         </div>
       </header>
@@ -825,8 +915,14 @@ export function App() {
                     type="button"
                     onClick={() => {
                       const next = item.address || item.content_id;
+                      // An encrypted paste must open through decrypt regardless
+                      // of the panel toggle, or the user sees raw ciphertext.
+                      const visibility: PasteVisibility = privatePaths.has(item.path || "")
+                        ? "private"
+                        : "public";
                       setTarget(next || "");
-                      if (next) void onOpenTarget(undefined, next);
+                      setOpenVisibility(visibility);
+                      if (next) void onOpenTarget(undefined, next, visibility);
                     }}
                   >
                     <ExternalLink size={15} />
@@ -921,7 +1017,9 @@ function SessionPanel({
   );
 }
 
-function PinState({ state }: { state: string }) {
-  const label = state.replace(/_/g, " ");
-  return <span className={`pin-state ${state}`}>{label}</span>;
+function PinState({ state }: { state?: string | null }) {
+  // pin_state is unvalidated wire data; a missing value must not throw
+  // inside render (that would white-screen the app without a boundary).
+  const safe = typeof state === "string" && state ? state : "unknown";
+  return <span className={`pin-state ${safe}`}>{safe.replace(/_/g, " ")}</span>;
 }
