@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#f3efe5"/>
+  <!-- Clipboard sheet, nudged up-left so the jolt badge owns the corner. -->
+  <rect x="14" y="10" width="28" height="38" rx="5" fill="#245e4a"/>
+  <rect x="21" y="6" width="14" height="9" rx="3" fill="#e9684f"/>
+  <g stroke="#f3efe5" stroke-width="4" stroke-linecap="round">
+    <path d="M21 24h14M21 32h14M21 40h9"/>
+  </g>
+  <g>
+    <rect x="39" y="39" width="21" height="21" rx="4.5" fill="#0b0d0c"/>
+    <path transform="translate(39 39) scale(0.328125)" d="M17 43 25 17h8l-8 26zm15 0 8-26h8l-8 26z" fill="#d9ff43"/>
+  </g>
+</svg>
