@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Pastey is a small Jolt app for public and encrypted pastes. A running local Jolt installation is required." />
+    <meta name="theme-color" content="#f7f4ec" />
+    <meta property="og:title" content="Pastey | Share the paste. Keep the keys." />
+    <meta property="og:description" content="Public pastes signed by your Jolt identity. Encrypted pastes for the people you choose. Relays only ever see ciphertext." />
+    <title>Pastey | Share the paste. Keep the keys.</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="script.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header page-width">
+      <a class="brand" href="#overview"><img class="brand-mark" src="favicon.svg" alt="" width="32" height="32" /><strong>Pastey</strong></a>
+      <nav aria-label="Primary navigation"><a href="#why">Why</a><a href="#features">Features</a><a href="#architecture">Architecture</a><a href="#download">Download</a></nav>
+      <div class="header-actions"><span><i></i> experimental</span><a href="https://alexanderwanyoike.github.io/jolt/" aria-label="Learn about Jolt">Jolt ↗</a><a href="https://github.com/alexanderwanyoike/pastey">GitHub ↗</a></div>
+    </header>
+
+    <main id="main">
+      <section class="hero page-width" id="overview">
+        <div class="hero-copy reveal">
+          <p class="eyebrow"><a href="https://alexanderwanyoike.github.io/jolt/">A Jolt app · requires Jolt ↗</a></p>
+          <h1>Share the paste.<br /><em>Keep the keys.</em></h1>
+          <p class="lede">Pastey is a small desktop app for public and encrypted pastes over the Jolt network. Public pastes are signed by your identity and fetchable by anyone at a <code>.jolt</code> address. Encrypted pastes stay private to you or the recipients you name.</p>
+          <div class="actions"><a class="button primary jolt-button" href="https://alexanderwanyoike.github.io/jolt/#download"><img class="jolt-button-mark" src="jolt-mark.svg" alt="" width="28" height="28" />Get Jolt first <b>↗</b></a><a class="text-link" href="#download">Then download Pastey <span>↓</span></a></div>
+        </div>
+
+        <figure class="hero-visual pastey-hero-visual reveal">
+          <svg viewBox="0 0 760 560" role="img" aria-labelledby="pastey-hero-title pastey-hero-desc">
+            <title id="pastey-hero-title">A paste leaving your device as either a public signed paste or an encrypted envelope</title>
+            <desc id="pastey-hero-desc">You write a paste on your device. A public paste is signed by your Jolt identity and anyone can fetch it by its .jolt address. An encrypted paste travels as a sealed envelope, and relays only ever see ciphertext.</desc>
+            <defs>
+              <filter id="pastey-soft-shadow" x="-35%" y="-45%" width="170%" height="190%"><feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#173c30" flood-opacity=".14"/></filter>
+            </defs>
+
+            <text x="26" y="31" class="paste-grid-kicker">ONE PASTE · PUBLIC OR ENCRYPTED</text>
+            <g class="paste-grid-live" transform="translate(704 27)"><circle r="4"/><text x="-12" y="4" text-anchor="end">JOLT NETWORK</text></g>
+
+            <g class="paste-grid-links">
+              <path id="pastey-route-write" class="paste-grid-link" d="M148 290H206"/>
+              <path id="pastey-route-relay" class="paste-grid-link active" d="M364 290H424"/>
+              <path id="pastey-route-public" class="paste-grid-link active" d="M528 249C577 210 611 180 646 158"/>
+              <path id="pastey-route-private" class="paste-grid-link active" d="M528 331C577 370 611 400 646 422"/>
+              <path id="pastey-route-arc" class="paste-grid-link faint" d="M655 190C700 260 700 320 655 390"/>
+            </g>
+
+            <g class="paste-avatar you" transform="translate(103 290)"><circle class="avatar-halo" r="48"/><circle class="avatar-core" r="35"/><circle class="avatar-head" cy="-9" r="9"/><path class="avatar-body" d="M-19 21C-17 4 17 4 19 21"/><circle class="avatar-presence" cx="36" cy="-35" r="5"/><text y="66" text-anchor="middle" class="avatar-name">YOU</text></g>
+
+            <g class="paste-board" transform="translate(287 290)" filter="url(#pastey-soft-shadow)">
+              <rect class="board-body" x="-78" y="-96" width="156" height="192" rx="14"/>
+              <rect class="board-clip" x="-24" y="-110" width="48" height="30" rx="9"/>
+              <path class="board-lines" d="M-52 -48h104M-52 -22h104M-52 4h72M-52 30h104M-52 56h58"/>
+              <g class="board-signature" transform="translate(46 58)"><circle r="14"/><path d="M-6 0l4 5 8-10"/></g>
+              <text y="128" text-anchor="middle" class="node-name">YOUR PASTE</text>
+              <text y="148" text-anchor="middle" class="node-note">written on this device</text>
+            </g>
+
+            <g class="relay-hex" transform="translate(476 290)">
+              <circle class="relay-orbit" r="62"/>
+              <path class="relay-body" d="M0-44L38-22V22L0 44L-38 22V-22Z"/>
+              <path class="cipher-lines" d="M-20 -12h12M-2 -12h20M-20 0h7M-7 0h26M-20 12h16M2 12h17"/>
+              <text y="92" text-anchor="middle" class="node-name">RELAY</text>
+              <text y="112" text-anchor="middle" class="node-note">sees only ciphertext</text>
+            </g>
+
+            <g class="paste-avatar anyone" transform="translate(672 132)"><circle class="avatar-halo" r="44"/><circle class="avatar-core" r="32"/><circle class="avatar-head" cy="-8" r="8"/><path class="avatar-body" d="M-18 20C-16 4 16 4 18 20"/><text y="62" text-anchor="middle" class="avatar-name">ANYONE</text><text y="80" text-anchor="middle" class="avatar-note">public · signed</text></g>
+            <g class="paste-avatar recipient" transform="translate(672 448)"><circle class="avatar-halo" r="44"/><g transform="translate(-13 -4)"><circle class="avatar-core" r="20"/><circle class="avatar-head" cy="-5" r="5.5"/><path class="avatar-body" d="M-11 12C-10 2 10 2 11 12"/></g><g transform="translate(17 8)"><circle class="avatar-core" r="17"/><circle class="avatar-head" cy="-4" r="4.5"/><path class="avatar-body thin" d="M-9 10C-8 2 8 2 9 10"/></g><text y="62" text-anchor="middle" class="avatar-name">RECIPIENTS</text><text y="80" text-anchor="middle" class="avatar-note">encrypted · invited</text></g>
+
+            <g class="address-chip" transform="translate(508 178)"><rect x="-78" y="-14" width="156" height="28" rx="6"/><text y="4" text-anchor="middle">jolt://…/pastes/notes</text></g>
+
+            <g class="moving-content moving-public" filter="url(#pastey-soft-shadow)">
+              <rect class="mini-card" x="-34" y="-25" width="68" height="50" rx="7"/><path class="mini-lines" d="M-22 -10h44M-22 0h30M-22 10h38"/><g class="mini-signature" transform="translate(22 12)"><circle r="8"/><path d="M-3.5 0l2.5 3 4.5-6"/></g>
+              <animateMotion dur="7.5s" repeatCount="indefinite"><mpath href="#pastey-route-public"/></animateMotion>
+            </g>
+            <g class="moving-content moving-sealed" filter="url(#pastey-soft-shadow)">
+              <rect class="sealed-body" x="-30" y="-20" width="60" height="42" rx="8"/><path class="sealed-shackle" d="M-9 -20v-7a9 9 0 0 1 18 0v7"/><path class="sealed-cipher" d="M-18 -6h13M1 -6h17M-18 6h8M-4 6h16"/>
+              <animateMotion dur="7.5s" begin="-3.75s" repeatCount="indefinite"><mpath href="#pastey-route-private"/></animateMotion>
+            </g>
+            <g class="moving-content moving-sealed small">
+              <rect class="sealed-body" x="-21" y="-14" width="42" height="30" rx="6"/><path class="sealed-shackle" d="M-6 -14v-5a6 6 0 0 1 12 0v5"/><path class="sealed-cipher" d="M-12 -4h9M1 -4h11M-12 5h6M-2 5h10"/>
+              <animateMotion dur="5.4s" repeatCount="indefinite"><mpath href="#pastey-route-relay"/></animateMotion>
+            </g>
+
+            <g class="paste-grid-legend" transform="translate(27 540)"><rect x="0" y="-12" width="20" height="15" rx="3"/><text x="32">PUBLIC · SIGNED</text><path class="legend-lock" d="M148 -9h14v12h-14zM151 -9v-3.5a4 4 0 0 1 8 0V-9"/><text x="172">ENCRYPTED · SEALED</text><path class="legend-hex" d="M330 -12l8 4.5v9l-8 4.5-8-4.5v-9z"/><text x="348">RELAYS HOLD CIPHERTEXT</text></g>
+          </svg>
+        </figure>
+      </section>
+
+      <section class="section page-width" id="why">
+        <header class="section-intro reveal">
+          <p class="eyebrow">01 / Why Pastey</p>
+          <h2>A paste is small.<br />Ownership is not.</h2>
+          <p>Even something as simple as sharing a snippet of text can run on an identity you own, with privacy the network cannot peek through.</p>
+        </header>
+        <ol class="principles reveal">
+          <li><span>01</span><h3>Bring your identity</h3><p>Public pastes are signed by your Jolt identity and published under a <code>.jolt</code> address. There is no Pastey account, and no username to register.</p></li>
+          <li><span>02</span><h3>Approve the app</h3><p>Pastey runs against your local Jolt daemon through a capability-scoped session you approve in Jolt Console, limited to paths under <code>/pastes/*</code>.</p></li>
+          <li><span>03</span><h3>Seal what is private</h3><p>Encrypted pastes use Jolt's encrypted object envelopes. Only you, or the recipients you list, can open them. Relays only ever see ciphertext.</p></li>
+        </ol>
+      </section>
+
+      <section class="section feature-section" id="features">
+        <div class="page-width">
+          <header class="section-intro reveal">
+            <p class="eyebrow">02 / What you can do</p>
+            <h2>Publish, fetch,<br />and share in private.</h2>
+            <p>Pastey keeps the surface small: write a paste, choose public or encrypted, and hand out its address. The Jolt daemon does the signing and sealing.</p>
+          </header>
+
+          <div class="feature-list reveal">
+            <article>
+              <span class="feature-index">01</span>
+              <div class="feature-glyph card-glyph"><i></i><i></i><i></i><span>✓</span></div>
+              <div><h3>Public pastes</h3><p>Publish text under <code>/pastes/{slug}</code>. The paste is signed by your Jolt identity, and anyone can fetch and verify it by its <code>.jolt</code> address.</p></div>
+            </article>
+            <article>
+              <span class="feature-index">02</span>
+              <div class="feature-glyph lock-glyph"><span></span><i></i></div>
+              <div><h3>Encrypted pastes</h3><p>Seal a paste inside Jolt's encrypted object envelope for yourself or a list of recipient identities. Everyone else, relays included, sees ciphertext.</p></div>
+            </article>
+            <article>
+              <span class="feature-index">03</span>
+              <div class="feature-glyph address-glyph"><code>jolt://…/pastes/notes</code><i></i></div>
+              <div><h3>Fetch by address</h3><p>Open any paste by its <code>.jolt</code> address or content ID. If it was encrypted for you, your local daemon decrypts it after its capability checks pass.</p></div>
+            </article>
+            <article>
+              <span class="feature-index">04</span>
+              <div class="feature-glyph pin-glyph"><span></span><i></i></div>
+              <div><h3>Optional pinning</h3><p>If your Jolt node has a home relay, Pastey can ask it to pin your paste content for availability. Publishing and fetching work without one.</p></div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section page-width" id="architecture">
+        <header class="section-intro reveal">
+          <p class="eyebrow">03 / Architecture</p>
+          <h2>Pastey is the app.<br />Jolt holds the keys.</h2>
+          <p>Pastey is only the editor and the viewer. It uses a scoped session with your local Jolt daemon, which holds your identity, signs and seals every paste, and talks to the network.</p>
+        </header>
+
+        <figure class="architecture-diagram reveal">
+          <div class="diagram-scroll">
+            <svg viewBox="0 0 1200 570" role="img" aria-labelledby="pastey-diagram-title pastey-diagram-desc">
+              <title id="pastey-diagram-title">How Pastey works with Jolt</title>
+              <desc id="pastey-diagram-desc">Pastey uses a capability-scoped session with the local Jolt daemon. The daemon signs public pastes, seals encrypted ones, and communicates with Jolt peer nodes and Jolt relay nodes.</desc>
+              <defs>
+                <marker id="pastey-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                  <path d="M0,0 L8,4 L0,8 Z" class="arrow-head" />
+                </marker>
+                <marker id="pastey-arrow-muted" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                  <path d="M0,0 L8,4 L0,8 Z" class="arrow-head-muted" />
+                </marker>
+              </defs>
+
+              <path class="device-outline" d="M45 76H748V510H45Z" />
+              <text x="68" y="55" class="zone-label">THIS DEVICE</text>
+              <text x="916" y="55" class="zone-label">JOLT NETWORK</text>
+
+              <g class="pastey-app-node" transform="translate(150 286)">
+                <circle r="62" /><text text-anchor="middle" y="11" class="pastey-symbol">P</text>
+                <text text-anchor="middle" y="99" class="node-name">PASTEY</text>
+                <text text-anchor="middle" y="122" class="node-note">editor + viewer</text>
+              </g>
+
+              <path class="flow-line request" d="M214 265C266 218 318 218 369 258" marker-end="url(#pastey-arrow)" />
+              <path class="flow-line response" d="M369 314C315 352 264 352 214 307" marker-end="url(#pastey-arrow-muted)" />
+              <text x="292" y="205" text-anchor="middle" class="flow-label">APP API</text>
+              <polygon class="permission-gate" points="330,274 342,286 330,298 318,286" />
+              <text x="330" y="328" text-anchor="middle" class="gate-label">SCOPED SESSION · /pastes/*</text>
+
+              <g class="jolt-daemon-node" transform="translate(542 286)">
+                <path class="daemon-outline" d="M-146-135H146V135H-146Z" />
+                <text x="-112" y="-96" class="daemon-kicker">LOCAL JOLT DAEMON</text>
+                <text x="-112" y="-61" class="jolt-name">jolt-node</text>
+                <line class="daemon-seam" x1="-146" y1="-32" x2="146" y2="-32" />
+                <text x="-112" y="3" class="component-name">Checks Pastey's grant</text>
+                <text x="-112" y="33" class="component-name">Signs + seals pastes</text>
+                <text x="-112" y="63" class="component-name">Stores content + logs</text>
+                <text x="-112" y="100" class="component-note">keys never enter Pastey</text>
+              </g>
+
+              <path class="flow-line request network-trunk" d="M688 286H784" />
+              <path class="flow-line request" d="M784 286C821 286 828 175 872 175" />
+              <path class="flow-line request" d="M784 286C821 286 828 397 872 397" />
+
+              <g class="network-node peer-node" transform="translate(952 175)">
+                <circle class="network-orbit" r="65" />
+                <circle class="network-core" r="42" />
+                <circle class="peer-dot" cx="-12" cy="-4" r="5" />
+                <circle class="peer-dot" cx="12" cy="-4" r="5" />
+                <path class="peer-mark" d="M-13 10L0 17L13 10" />
+                <text text-anchor="middle" y="94" class="node-name">JOLT PEER NODE</text>
+                <text text-anchor="middle" y="116" class="node-note">signed state + content</text>
+              </g>
+
+              <g class="network-node relay-node" transform="translate(952 397)">
+                <circle class="network-orbit" r="65" />
+                <path class="relay-core" d="M0-43L37-22V22L0 43L-37 22V-22Z" />
+                <path class="relay-mark" d="M-16 8V-9L0-19L16-9V8M-23 15H23" />
+                <text text-anchor="middle" y="94" class="node-name">JOLT RELAY NODE</text>
+                <text text-anchor="middle" y="116" class="node-note">ciphertext · optional pinning</text>
+              </g>
+
+              <text x="597" y="546" text-anchor="middle" class="diagram-promise">Pastey uses Jolt. It never touches your keys.</text>
+            </svg>
+          </div>
+          <figcaption>Pastey talks only to the capability-scoped App API, approved in Jolt Console and limited to <code>/pastes/*</code>. The local daemon keeps the keys, signs public pastes, seals encrypted ones, and communicates with peer or relay nodes.</figcaption>
+        </figure>
+
+        <div class="boundary-truths reveal">
+          <p><span>IF PASTEY VANISHED</span><strong>your identity and pastes would still be yours.</strong></p>
+          <p><span>WHAT PASTEY NEVER GETS</span><strong>your private identity key.</strong></p>
+        </div>
+      </section>
+
+      <section class="section status-section">
+        <div class="page-width status-layout reveal">
+          <div>
+            <p class="eyebrow">Experimental v0</p>
+            <h2>An early, honest<br />prototype.</h2>
+            <p>Pastey is one of the first two apps built on Jolt, alongside <a class="inline-link" href="https://github.com/alexanderwanyoike/spoke">Spoke</a>. It is desktop-first, Jolt must be running on your computer, and you approve Pastey's session before it can publish anything. Expect rough edges.</p>
+            <div class="actions"><a class="button primary" href="#download">Choose your platform ↓</a><a class="text-link" href="https://alexanderwanyoike.github.io/jolt/">Explore Jolt <span>→</span></a></div>
+          </div>
+          <div class="status-lists">
+            <div><span class="status-label available">AVAILABLE</span><ul><li>Public pastes under /pastes/{slug}</li><li>Encrypted pastes for recipient lists</li><li>Fetch by .jolt address or CID</li><li>List your published pastes</li><li>Optional home-relay pinning</li></ul></div>
+            <div><span class="status-label limits">V0 LIMITS</span><ul><li>Manual Jolt approval</li><li>No recipient edits after publish</li><li>No key management UI</li><li>Unsigned macOS build</li><li>No security audit</li></ul></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="download-section" id="download">
+        <div class="page-width">
+          <header class="download-head reveal">
+            <div>
+              <p class="eyebrow"><a href="https://github.com/alexanderwanyoike/pastey/releases/latest">Latest release ↗</a></p>
+              <h2>Jolt first.<br />Pastey second.</h2>
+            </div>
+            <p>Pastey connects to the Jolt node running on your computer. Once Jolt is installed and running, choose the Pastey build for your platform. Each button fetches the latest tagged release.</p>
+          </header>
+
+          <div class="jolt-prerequisite reveal">
+            <span>Required first</span>
+            <p><strong>Pastey cannot run standalone.</strong> Jolt holds your identity, joins the network, and asks you to approve Pastey's <code>/pastes/*</code> session before the app can publish.</p>
+            <a class="jolt-prerequisite-link" href="https://alexanderwanyoike.github.io/jolt/#download"><img src="jolt-mark.svg" alt="" width="24" height="24" />Download Jolt ↗</a>
+          </div>
+
+          <div class="platform-downloads reveal">
+            <a class="download-column" href="https://github.com/alexanderwanyoike/pastey/releases/latest/download/pastey-x86_64.AppImage" aria-label="Download the latest Pastey for Linux x86_64 as an AppImage">
+              <span class="download-column-top"><span class="download-index">01</span><svg class="os-icon linux-icon" viewBox="0 0 48 48" aria-hidden="true"><path d="M24 4c-5.2 0-8.2 4.8-8.2 11.7 0 3-1.2 5.8-3.7 8.8-2.3 2.8-3.2 6.3-2.5 9.6l5.3-2c.9 7.2 4.1 11.9 9.1 11.9s8.2-4.7 9.1-11.9l5.3 2c.7-3.3-.2-6.8-2.5-9.6-2.5-3-3.7-5.8-3.7-8.8C32.2 8.8 29.2 4 24 4Z"/><ellipse class="icon-cutout" cx="24" cy="29" rx="7.1" ry="11.2"/><circle class="icon-cutout" cx="20.7" cy="15.8" r="1.5"/><circle class="icon-cutout" cx="27.3" cy="15.8" r="1.5"/><path class="icon-cutout" d="m20.5 20 3.5 2.6 3.5-2.6-3.5-2Z"/></svg></span>
+              <span class="download-platform"><strong>Linux</strong><small>x86_64</small></span>
+              <span class="download-format">AppImage</span>
+              <span class="download-action">Download <b>↓</b></span>
+            </a>
+            <a class="download-column" href="https://github.com/alexanderwanyoike/pastey/releases/latest/download/pastey-aarch64.dmg" aria-label="Download the latest Pastey for Apple silicon as a DMG">
+              <span class="download-column-top"><span class="download-index">02</span><svg class="os-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></svg></span>
+              <span class="download-platform"><strong>macOS</strong><small>Apple silicon</small></span>
+              <span class="download-format">DMG</span>
+              <span class="download-action">Download <b>↓</b></span>
+            </a>
+            <a class="download-column" href="https://github.com/alexanderwanyoike/pastey/releases/latest/download/pastey-x86_64-setup.exe" aria-label="Download the latest Pastey for Windows x86_64">
+              <span class="download-column-top"><span class="download-index">03</span><svg class="os-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M0 3.449 9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/></svg></span>
+              <span class="download-platform"><strong>Windows</strong><small>x86_64</small></span>
+              <span class="download-format">Installer</span>
+              <span class="download-action">Download <b>↓</b></span>
+            </a>
+          </div>
+
+          <div class="download-foot reveal">
+            <p>The macOS build is not yet notarized. If it is blocked after installation, allow it under Privacy &amp; Security.</p>
+            <span><a href="https://alexanderwanyoike.github.io/jolt/#download">Get Jolt first →</a><a href="https://github.com/alexanderwanyoike/pastey/releases/latest">Release notes ↗</a></span>
+          </div>
+
+          <aside class="macos-help reveal" aria-label="Opening the unsigned macOS build">
+            <span>macOS help</span>
+            <div>
+              <p>If macOS says Pastey is damaged after you drag it to Applications, open Terminal and clear the download quarantine:</p>
+              <code>xattr -dr com.apple.quarantine "/Applications/Pastey.app"</code>
+            </div>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer page-width">
+      <a class="brand" href="#overview"><img class="brand-mark small" src="favicon.svg" alt="" width="26" height="26" /><strong>Pastey</strong></a>
+      <p>A Jolt app for pastes you own.</p>
+      <nav><a href="https://github.com/alexanderwanyoike/pastey">GitHub ↗</a><a href="https://github.com/alexanderwanyoike/spoke">Spoke ↗</a><a href="https://alexanderwanyoike.github.io/jolt/">Jolt →</a></nav>
+    </footer>
+  </body>
+</html>
