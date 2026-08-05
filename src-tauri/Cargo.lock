@@ -3628,7 +3628,8 @@ dependencies = [
 [[package]]
 name = "tauri-plugin-jolt"
 version = "0.1.0"
-source = "git+https://github.com/alexanderwanyoike/jolt.git?rev=6a60e67d8e7bd864acb56ddc8b9aa51ea72e6371#6a60e67d8e7bd864acb56ddc8b9aa51ea72e6371"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0be3a9ba8ad04bc3fba5aca1a38c7e450af14068d364e37addb09968595d6b4d"
 dependencies = [
  "reqwest 0.12.28",
  "serde",
