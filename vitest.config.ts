@@ -15,8 +15,8 @@ export default defineConfig({
   test: {
     server: {
       deps: {
-        // Process @jolt/sdk (do not externalize) so mocks and the alias apply.
-        inline: ["@jolt/sdk"],
+        // Process jolt-sdk (do not externalize) so mocks and the alias apply.
+        inline: ["jolt-sdk"],
       },
     },
   },

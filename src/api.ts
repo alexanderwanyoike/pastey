@@ -1,4 +1,4 @@
-// Pastey's daemon seam, since v0.1.2 a thin binding over @jolt/sdk.
+// Pastey's daemon seam, since v0.1.2 a thin binding over jolt-sdk.
 //
 // The wire core that used to live here (a copy of Spoke's transport) is now
 // the shared SDK; this module keeps Pastey's historical export surface and
@@ -13,9 +13,9 @@ import {
   JoltTransportError,
   operations as ops,
   type JoltTransport,
-} from "@jolt/sdk";
-import { HttpTransport } from "@jolt/sdk/transport-http";
-import { isTauriRuntime, TauriTransport } from "@jolt/sdk/transport-tauri";
+} from "jolt-sdk";
+import { HttpTransport } from "jolt-sdk/transport-http";
+import { isTauriRuntime, TauriTransport } from "jolt-sdk/transport-tauri";
 
 export type NodeStatus = {
   peer_id: string;
