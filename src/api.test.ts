@@ -94,7 +94,10 @@ describe("Pastey daemon API client", () => {
 
     await expect(getStatus()).resolves.toEqual({ identity_address: "alice.jolt" });
 
-    expect(fetch).toHaveBeenCalledWith("/api/v1/status", undefined);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v1/status",
+      expect.objectContaining({ method: "GET" })
+    );
   });
 
   it("sends bearer session tokens on app API reads and writes", async () => {
@@ -144,7 +147,7 @@ describe("Pastey daemon API client", () => {
     await listPublished("token-1");
 
     expect(fetch).not.toHaveBeenCalled();
-    expect(invokeMock).toHaveBeenCalledWith("daemon_request", {
+    expect(invokeMock).toHaveBeenCalledWith("plugin:jolt|daemon_request", {
       basePath: "/app/v1",
       path: "/published",
       method: "GET",
@@ -161,7 +164,7 @@ describe("Pastey daemon API client", () => {
     await getStatus();
 
     expect(fetch).not.toHaveBeenCalled();
-    expect(invokeMock).toHaveBeenCalledWith("daemon_request", {
+    expect(invokeMock).toHaveBeenCalledWith("plugin:jolt|daemon_request", {
       basePath: "/api/v1",
       path: "/status",
       method: "GET",
@@ -178,7 +181,10 @@ describe("Pastey daemon API client", () => {
     await getStatus();
 
     expect(invokeMock).not.toHaveBeenCalled();
-    expect(fetch).toHaveBeenCalledWith("/api/v1/status", undefined);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v1/status",
+      expect.objectContaining({ method: "GET" })
+    );
   });
 
   it("uses a Tauri daemon command for desktop text publishing", async () => {
@@ -188,10 +194,12 @@ describe("Pastey daemon API client", () => {
     await publishPaste("token-1", "/pastes/hello", "hello");
 
     expect(fetch).not.toHaveBeenCalled();
-    expect(invokeMock).toHaveBeenCalledWith("daemon_publish_text", {
+    expect(invokeMock).toHaveBeenCalledWith("plugin:jolt|daemon_publish_bytes", {
       sessionToken: "token-1",
       path: "/pastes/hello",
-      text: "hello"
+      bytes: Array.from(new TextEncoder().encode("hello")),
+      fileName: "hello.txt",
+      mimeType: "text/plain"
     });
   });
 

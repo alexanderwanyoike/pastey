@@ -1,4 +1,21 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
+// Pastey's daemon seam, since v0.1.2 a thin binding over jolt-sdk.
+//
+// The wire core that used to live here (a copy of Spoke's transport) is now
+// the shared SDK; this module keeps Pastey's historical export surface and
+// its app-specific richer DTOs, and drops to the SDK transport directly for
+// the two endpoints the SDK does not wrap (/encrypted/open, /home-relay/pins).
+// On desktop the transport invokes the tauri-plugin-jolt commands; on web it
+// calls the daemon base paths the vite proxy forwards.
+
+import {
+  apiErrorMessage as sdkApiErrorMessage,
+  JoltApiError,
+  JoltTransportError,
+  operations as ops,
+  type JoltTransport,
+} from "jolt-sdk";
+import { HttpTransport } from "jolt-sdk/transport-http";
+import { isTauriRuntime, TauriTransport } from "jolt-sdk/transport-tauri";
 
 export type NodeStatus = {
   peer_id: string;
@@ -138,113 +155,25 @@ const PASTEY_APP_ID = "pastey.local";
 const PASTEY_APP_NAME = "Pastey";
 const PASTEY_APP_ORIGIN = "http://127.0.0.1:5174";
 const PASTEY_PATH_PREFIX = "/pastes/";
-const APP_API_BASE = "/app/v1";
-const DAEMON_API_BASE = "/api/v1";
 
-type ApiBasePath = typeof APP_API_BASE | typeof DAEMON_API_BASE;
-
-async function parseResponse<T>(response: Response): Promise<T> {
-  const contentType = response.headers.get("content-type") || "";
-  const body = contentType.includes("application/json")
-    ? await response.json()
-    : await response.text();
-
-  if (!response.ok) {
-    const message =
-      typeof body === "object" && body && "error" in body
-        ? String((body as { error: unknown }).error)
-        : typeof body === "string" && body.trim()
-          ? body
-          : `HTTP ${response.status}`;
-    throw new Error(message);
-  }
-
-  return body as T;
-}
-
-function isDesktopRuntime() {
-  const internals =
-    typeof window === "undefined"
-      ? null
-      : (window as typeof window & {
-          __TAURI_INTERNALS__?: { invoke?: unknown };
-        }).__TAURI_INTERNALS__;
-  return isTauri() || typeof internals?.invoke === "function";
-}
-
-function authorizationToken(init?: RequestInit) {
-  const headers = init?.headers;
-  if (!headers || headers instanceof Headers || Array.isArray(headers)) {
-    return null;
-  }
-
-  const authorization = headers.Authorization || headers.authorization;
-  return authorization?.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : null;
-}
-
-function jsonBody(init?: RequestInit) {
-  return typeof init?.body === "string" ? JSON.parse(init.body) : null;
-}
-
-async function desktopRequest<T>(
-  basePath: ApiBasePath,
-  path: string,
-  init?: RequestInit
-): Promise<T> {
-  return invoke<T>("daemon_request", {
-    basePath,
-    path,
-    method: init?.method || "GET",
-    body: jsonBody(init),
-    sessionToken: authorizationToken(init)
-  });
-}
-
-async function request<T>(basePath: ApiBasePath, path: string, init?: RequestInit): Promise<T> {
-  if (isDesktopRuntime()) {
-    return desktopRequest<T>(basePath, path, init);
-  }
-
-  const response = await fetch(`${basePath}${path}`, init);
-  return parseResponse<T>(response);
-}
-
-function bearerInit(sessionToken: string, init: RequestInit = {}): RequestInit {
-  return {
-    ...init,
-    headers: {
-      ...(init.headers as Record<string, string> | undefined),
-      Authorization: `Bearer ${sessionToken}`
-    }
-  };
-}
-
-function jsonInit(sessionToken: string | null, body: unknown): RequestInit {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (sessionToken) {
-    headers.Authorization = `Bearer ${sessionToken}`;
-  }
-
-  return {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body)
-  };
+// Desktop invokes the tauri-plugin-jolt commands; web hits /app/v1 and
+// /api/v1 directly, which the vite dev proxy forwards to the daemon. The
+// runtime is probed per call (constructors are trivial), matching the old
+// behavior and keeping tests free to switch runtimes.
+function getTransport(): JoltTransport {
+  return isTauriRuntime()
+    ? new TauriTransport({ plugin: true })
+    : new HttpTransport({ bases: { app: "/app/v1", daemon: "/api/v1" } });
 }
 
 export function apiErrorMessage(error: unknown) {
-  if (error instanceof TypeError) {
+  if (error instanceof JoltTransportError || error instanceof TypeError) {
     return "Cannot reach the Jolt daemon. Start Jolt Console and make sure the daemon is running.";
   }
-
-  if (error instanceof Error) {
-    if (error.message === "HTTP 500" || error.message === "HTTP 502") {
-      return "Cannot reach the Jolt daemon. Start Jolt Console and make sure the daemon is running.";
-    }
-    return error.message;
+  if (error instanceof JoltApiError && (error.status === 500 || error.status === 502)) {
+    return "Cannot reach the Jolt daemon. Start Jolt Console and make sure the daemon is running.";
   }
-
-  return String(error);
+  return sdkApiErrorMessage(error);
 }
 
 export function isMissingAppSessionRequestError(error: unknown) {
@@ -252,60 +181,48 @@ export function isMissingAppSessionRequestError(error: unknown) {
 }
 
 export function getStatus() {
-  return request<NodeStatus>(DAEMON_API_BASE, "/status");
+  return getTransport().request<NodeStatus>("daemon", "/status");
 }
 
 export function requestPasteySession(identity: string | null) {
-  const appOrigin =
-    typeof window === "undefined" ? PASTEY_APP_ORIGIN : window.location.origin;
-
-  return request<AppSessionRequestResponse>(
-    APP_API_BASE,
-    "/sessions/request",
-    jsonInit(null, {
+  const appOrigin = typeof window === "undefined" ? PASTEY_APP_ORIGIN : window.location.origin;
+  return getTransport().request<AppSessionRequestResponse>("app", "/sessions/request", {
+    json: {
       app_id: PASTEY_APP_ID,
       app_name: PASTEY_APP_NAME,
       app_origin: appOrigin,
       requested_identity: identity,
       requested_capabilities: PASTEY_CAPABILITIES
-    })
-  );
+    }
+  });
 }
 
 export function getSessionRequestStatus(requestId: string) {
-  return request<AppSessionStatusResponse>(APP_API_BASE, `/sessions/${requestId}`);
+  return getTransport().request<AppSessionStatusResponse>(
+    "app",
+    `/sessions/${encodeURIComponent(requestId)}`
+  );
 }
 
 export function getCurrentSession(sessionToken: string) {
-  return request<CurrentAppSession>(APP_API_BASE, "/session", bearerInit(sessionToken));
+  return getTransport().request<CurrentAppSession>("app", "/session", { token: sessionToken });
 }
 
 export function listPublished(sessionToken: string) {
-  return request<PublishedContent[]>(APP_API_BASE, "/published", bearerInit(sessionToken));
+  return getTransport().request<PublishedContent[]>("app", "/published", { token: sessionToken });
 }
 
 export function publishPaste(sessionToken: string, path: string, text: string) {
   if (!path.startsWith(PASTEY_PATH_PREFIX)) {
     throw new Error("Pastey can only publish under /pastes/");
   }
-
-  if (isDesktopRuntime()) {
-    return invoke<PublishResponse>("daemon_publish_text", {
-      sessionToken,
-      path,
-      text
-    });
-  }
-
-  const form = new FormData();
-  const file = new Blob([text], { type: "text/plain" });
-  form.append("file", file, `${path.split("/").pop() || "paste"}.txt`);
-  form.append("path", path);
-
-  return request<PublishResponse>(APP_API_BASE, "/publish", bearerInit(sessionToken, {
-    method: "POST",
-    body: form
-  }));
+  return ops.publishBytes(
+    getTransport(),
+    sessionToken,
+    path,
+    new TextEncoder().encode(text),
+    { fileName: `${path.split("/").pop() || "paste"}.txt`, mimeType: "text/plain" }
+  ) as Promise<PublishResponse>;
 }
 
 export function publishPrivatePaste(
@@ -317,51 +234,42 @@ export function publishPrivatePaste(
   if (!path.startsWith(PASTEY_PATH_PREFIX)) {
     throw new Error("Pastey can only publish under /pastes/");
   }
-
-  const trimmedRecipients = recipients.map((recipient) => recipient.trim()).filter(Boolean);
-
-  return request<EncryptedPublishResponse>(
-    APP_API_BASE,
-    "/encrypted/publish",
-    jsonInit(sessionToken, {
-      path,
-      plaintext: Array.from(new TextEncoder().encode(text)),
-      content_type: "text/plain",
-      recipients: trimmedRecipients
-    })
-  );
+  return ops.publishEncryptedBytes(
+    getTransport(),
+    sessionToken,
+    path,
+    new TextEncoder().encode(text),
+    { mimeType: "text/plain", recipients }
+  ) as Promise<EncryptedPublishResponse>;
 }
 
 export function resolveAddress(sessionToken: string, address: string) {
-  return request<ResolveResponse>(APP_API_BASE, "/resolve", jsonInit(sessionToken, { address }));
+  return ops.resolveAddress(getTransport(), sessionToken, address) as Promise<ResolveResponse>;
 }
 
 export function fetchTarget(sessionToken: string, target: string) {
-  return request<FetchResult>(APP_API_BASE, "/fetch", jsonInit(sessionToken, { target }));
+  return ops.fetchTarget(getTransport(), sessionToken, target) as Promise<FetchResult>;
 }
 
 export function decryptPaste(sessionToken: string, target: string) {
-  return request<DecryptResponse>(
-    APP_API_BASE,
-    "/encrypted/decrypt",
-    jsonInit(sessionToken, { target })
-  );
+  return getTransport().request<DecryptResponse>("app", "/encrypted/decrypt", {
+    token: sessionToken,
+    json: { target }
+  });
 }
 
 export function openPrivatePaste(sessionToken: string, target: string) {
-  return request<OpenPrivateResponse>(
-    APP_API_BASE,
-    "/encrypted/open",
-    jsonInit(sessionToken, { target })
-  );
+  return getTransport().request<OpenPrivateResponse>("app", "/encrypted/open", {
+    token: sessionToken,
+    json: { target }
+  });
 }
 
 export function pinHomeRelay(sessionToken: string, contentId: string, path?: string | null) {
-  return request<HomeRelayPinResponse>(
-    APP_API_BASE,
-    "/home-relay/pins",
-    jsonInit(sessionToken, { content_id: contentId, path })
-  );
+  return getTransport().request<HomeRelayPinResponse>("app", "/home-relay/pins", {
+    token: sessionToken,
+    json: { content_id: contentId, path }
+  });
 }
 
 export function decodeFetchData(result: FetchResult) {
