@@ -555,7 +555,13 @@ export function App() {
       <header className="topbar">
         <div className="brand">
           <div className="mark">
-            <Clipboard size={18} aria-hidden="true" />
+            <svg viewBox="0 0 64 64" width="26" height="26" aria-hidden="true">
+              <rect x="18" y="14" width="28" height="38" rx="5" fill="#245e4a" />
+              <rect x="25" y="10" width="14" height="9" rx="3" fill="#e9684f" />
+              <g stroke="#f3efe5" strokeWidth="4" strokeLinecap="round">
+                <path d="M25 28h14M25 36h14M25 44h9" />
+              </g>
+            </svg>
           </div>
           <div>
             <p>Pastey</p>
