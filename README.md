@@ -119,7 +119,9 @@ latest.json
 ```
 
 Packaged Pastey updates are signed and verified before installation. Pastey
-uses its own updater key, separate from Jolt Console.
+uses its own updater key, separate from Jolt Console. Each update manifest also
+declares the Jolt App API behavior required by that Pastey release; an
+incompatible update remains pending instead of replacing the installed app.
 
 ## Web Dev Fallback
 

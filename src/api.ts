@@ -2,143 +2,53 @@
 //
 // The wire core that used to live here (a copy of Spoke's transport) is now
 // the shared SDK; this module keeps Pastey's historical export surface and
-// its app-specific richer DTOs, and drops to the SDK transport directly for
-// the two endpoints the SDK does not wrap (/encrypted/open, /home-relay/pins).
+// its app-specific text/path guards. Generic daemon operations stay behind
+// released SDK operations or the fakeable high-level client.
 // On desktop the transport invokes the tauri-plugin-jolt commands; on web it
 // calls the daemon base paths the vite proxy forwards.
 
 import {
   apiErrorMessage as sdkApiErrorMessage,
-  JoltApiError,
-  JoltTransportError,
+  createJoltClient,
   operations as ops,
+  type AppCompatibilityDeclaration,
+  type AppSessionRequestResponse,
+  type AppSessionStatus,
+  type AppSessionStatusResponse,
+  type CompatibilityCheckOptions,
+  type CurrentAppSession,
+  type DecryptedEncryptedObject,
+  type EncryptedPublishResponse,
+  type FetchResult,
+  type HomeRelayPinResult,
   type JoltTransport,
+  type NodeStatus,
+  type OpenEncryptedResult,
+  type PublishedContent,
+  type PublishResponse,
+  type ResolveResponse,
 } from "jolt-sdk";
 import { HttpTransport } from "jolt-sdk/transport-http";
 import { isTauriRuntime, TauriTransport } from "jolt-sdk/transport-tauri";
+import appCompatibility from "../pastey-compatibility.json";
+import { isJoltUnavailableError } from "./jolt-errors";
 
-export type NodeStatus = {
-  peer_id: string;
-  identity_address: string;
-  uptime_secs: number;
-  connected_peers: number;
-  direct_peers: number;
-  relayed_peers: number;
-  nat_type: string;
-  active_relays: number;
-  published_count: number;
-  cached_count: number;
-  bootstrap_state: string;
-  known_relay_count: number;
-  connected_bootstrap_peers: number;
-  home_relay: null | {
-    peer_id: string;
-    multiaddr: string;
-    capability: string;
-    api_url?: string | null;
-  };
+export type {
+  AppSessionRequestResponse,
+  AppSessionStatus,
+  AppSessionStatusResponse,
+  CurrentAppSession,
+  EncryptedPublishResponse,
+  FetchResult,
+  HomeRelayPinResult,
+  NodeStatus,
+  OpenEncryptedResult as OpenPrivateResponse,
+  PublishedContent,
+  PublishResponse,
+  ResolveResponse
 };
 
-export type PublishResponse = {
-  content_id: string;
-  size: number;
-  path?: string;
-  address?: string;
-  latest_sequence?: number;
-};
-
-export type EncryptedPublishResponse = PublishResponse & {
-  recipient_count: number;
-};
-
-export type DecryptResponse = {
-  content_id: string;
-  path: string;
-  plaintext: number[];
-  size: number;
-  content_type: string;
-};
-
-export type OpenPrivateResponse = {
-  content_id: string;
-  path: string;
-  status: "decrypted" | "ciphertext";
-  plaintext?: number[] | null;
-  ciphertext?: number[] | null;
-  size: number;
-  content_type?: string | null;
-  decrypt_error?: string | null;
-};
-
-export type PublishedContent = {
-  content_id: string;
-  size: number;
-  path?: string | null;
-  address?: string | null;
-  local_sequence?: number | null;
-  pin_state: string;
-  relay?: null | {
-    peer_id: string;
-    multiaddr: string;
-    api_url?: string | null;
-  };
-  pinned_content_id?: string | null;
-  pinned_sequence?: number | null;
-};
-
-export type ResolveResponse = {
-  address: string;
-  identity: string;
-  path: string;
-  latest_sequence: number;
-  content_id: string;
-  reachability_hints: unknown[];
-  source: string;
-};
-
-export type FetchResult = {
-  data: number[];
-  content_id: string;
-  size: number;
-};
-
-export type HomeRelayPinResponse = {
-  content_id: string;
-  path?: string | null;
-  relay_peer_id: string;
-  relay_api_url?: string | null;
-  latest_sequence?: number | null;
-};
-
-export type AppSessionStatus = "pending" | "active" | "rejected" | "revoked" | "expired";
-
-export type AppSessionRequestResponse = {
-  request_id: string;
-  status: AppSessionStatus;
-};
-
-export type AppSessionStatusResponse = {
-  request_id: string;
-  session_id?: string | null;
-  session_token?: string | null;
-  status: AppSessionStatus;
-  requested_identity?: string | null;
-  identity?: string | null;
-  capabilities: string[];
-  expires_at?: number | null;
-};
-
-export type CurrentAppSession = {
-  request_id: string;
-  session_id?: string | null;
-  app_id: string;
-  app_name: string;
-  identity?: string | null;
-  granted_capabilities: string[];
-  status: AppSessionStatus;
-  expires_at?: number | null;
-  last_used_at?: number | null;
-};
+export type DecryptResponse = DecryptedEncryptedObject;
 
 export const PASTEY_CAPABILITIES = [
   "resolve:public",
@@ -156,21 +66,48 @@ const PASTEY_APP_NAME = "Pastey";
 const PASTEY_APP_ORIGIN = "http://127.0.0.1:5174";
 const PASTEY_PATH_PREFIX = "/pastes/";
 
+export const PASTEY_COMPATIBILITY = {
+  appApi: appCompatibility.app_api,
+  requiredFeatures: appCompatibility.required_features,
+  optionalFeatures: appCompatibility.optional_features
+} as const satisfies AppCompatibilityDeclaration;
+
 // Desktop invokes the tauri-plugin-jolt commands; web hits /app/v1 and
-// /api/v1 directly, which the vite dev proxy forwards to the daemon. The
-// runtime is probed per call (constructors are trivial), matching the old
-// behavior and keeping tests free to switch runtimes.
+// /api/v1 directly, which the vite dev proxy forwards to the daemon. Stable
+// per-runtime clients retain the feature manifest cache; token-bound clients
+// remain short-lived so one app-session token cannot leak into another call.
+const desktopTransport = new TauriTransport({ plugin: true });
+const webTransport = new HttpTransport({ bases: { app: "/app/v1", daemon: "/api/v1" } });
+const desktopCompatibilityClient = createJoltClient({
+  transport: desktopTransport,
+  getSessionToken: () => ""
+});
+const webCompatibilityClient = createJoltClient({
+  transport: webTransport,
+  getSessionToken: () => ""
+});
+
 function getTransport(): JoltTransport {
-  return isTauriRuntime()
-    ? new TauriTransport({ plugin: true })
-    : new HttpTransport({ bases: { app: "/app/v1", daemon: "/api/v1" } });
+  return isTauriRuntime() ? desktopTransport : webTransport;
+}
+
+function getClient(sessionToken = "") {
+  return createJoltClient({
+    transport: getTransport(),
+    getSessionToken: () => sessionToken
+  });
+}
+
+export function checkPasteyCompatibility(
+  declaration: AppCompatibilityDeclaration = PASTEY_COMPATIBILITY,
+  options?: CompatibilityCheckOptions
+) {
+  const client = isTauriRuntime() ? desktopCompatibilityClient : webCompatibilityClient;
+  return client.checkCompatibility(declaration, options);
 }
 
 export function apiErrorMessage(error: unknown) {
-  if (error instanceof JoltTransportError || error instanceof TypeError) {
-    return "Cannot reach the Jolt daemon. Start Jolt Console and make sure the daemon is running.";
-  }
-  if (error instanceof JoltApiError && (error.status === 500 || error.status === 502)) {
+  if (isJoltUnavailableError(error)) {
     return "Cannot reach the Jolt daemon. Start Jolt Console and make sure the daemon is running.";
   }
   return sdkApiErrorMessage(error);
@@ -181,35 +118,30 @@ export function isMissingAppSessionRequestError(error: unknown) {
 }
 
 export function getStatus() {
-  return getTransport().request<NodeStatus>("daemon", "/status");
+  return getClient().getStatus();
 }
 
 export function requestPasteySession(identity: string | null) {
   const appOrigin = typeof window === "undefined" ? PASTEY_APP_ORIGIN : window.location.origin;
-  return getTransport().request<AppSessionRequestResponse>("app", "/sessions/request", {
-    json: {
-      app_id: PASTEY_APP_ID,
-      app_name: PASTEY_APP_NAME,
-      app_origin: appOrigin,
-      requested_identity: identity,
-      requested_capabilities: PASTEY_CAPABILITIES
-    }
+  return getClient().requestSession({
+    appId: PASTEY_APP_ID,
+    appName: PASTEY_APP_NAME,
+    appOrigin,
+    identity,
+    capabilities: PASTEY_CAPABILITIES
   });
 }
 
 export function getSessionRequestStatus(requestId: string) {
-  return getTransport().request<AppSessionStatusResponse>(
-    "app",
-    `/sessions/${encodeURIComponent(requestId)}`
-  );
+  return getClient().getSessionRequestStatus(requestId);
 }
 
 export function getCurrentSession(sessionToken: string) {
-  return getTransport().request<CurrentAppSession>("app", "/session", { token: sessionToken });
+  return getClient(sessionToken).getCurrentSession();
 }
 
 export function listPublished(sessionToken: string) {
-  return getTransport().request<PublishedContent[]>("app", "/published", { token: sessionToken });
+  return getClient(sessionToken).listPublished();
 }
 
 export function publishPaste(sessionToken: string, path: string, text: string) {
@@ -252,24 +184,15 @@ export function fetchTarget(sessionToken: string, target: string) {
 }
 
 export function decryptPaste(sessionToken: string, target: string) {
-  return getTransport().request<DecryptResponse>("app", "/encrypted/decrypt", {
-    token: sessionToken,
-    json: { target }
-  });
+  return ops.decryptEncryptedTarget(getTransport(), sessionToken, target) as Promise<DecryptResponse>;
 }
 
 export function openPrivatePaste(sessionToken: string, target: string) {
-  return getTransport().request<OpenPrivateResponse>("app", "/encrypted/open", {
-    token: sessionToken,
-    json: { target }
-  });
+  return getClient(sessionToken).openEncrypted(target);
 }
 
 export function pinHomeRelay(sessionToken: string, contentId: string, path?: string | null) {
-  return getTransport().request<HomeRelayPinResponse>("app", "/home-relay/pins", {
-    token: sessionToken,
-    json: { content_id: contentId, path }
-  });
+  return getClient(sessionToken).pinHomeRelay(contentId, path ?? undefined);
 }
 
 export function decodeFetchData(result: FetchResult) {
@@ -280,7 +203,6 @@ export function decodePlaintext(result: DecryptResponse) {
   return new TextDecoder().decode(new Uint8Array(result.plaintext));
 }
 
-export function decodePrivateOpen(result: OpenPrivateResponse) {
-  const bytes = result.status === "decrypted" ? result.plaintext : result.ciphertext;
-  return new TextDecoder().decode(new Uint8Array(bytes || []));
+export function decodePrivateOpen(result: OpenEncryptedResult) {
+  return new TextDecoder().decode(new Uint8Array(result.bytes));
 }

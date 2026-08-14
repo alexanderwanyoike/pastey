@@ -17,6 +17,7 @@ import {
   isMissingAppSessionRequestError,
   listPublished,
   openPrivatePaste,
+  pinHomeRelay,
   publishPrivatePaste,
   publishPaste,
   requestPasteySession
@@ -277,6 +278,28 @@ describe("Pastey daemon API client", () => {
         body: JSON.stringify({ target: "alice.jolt/pastes/secret" })
       })
     );
+  });
+
+  it("uses the SDK domain contract for a home-relay pin", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({
+      status: "pinned",
+      relay: "12D3KooWRelay",
+      owner: "alice.jolt",
+      content_id: "cid-public",
+      latest_sequence: 3,
+      size: 6
+    }));
+
+    await expect(
+      pinHomeRelay("token-1", "cid-public", "/pastes/hello")
+    ).resolves.toEqual({
+      status: "pinned",
+      relay: "12D3KooWRelay",
+      owner: "alice.jolt",
+      contentId: "cid-public",
+      latestSequence: 3,
+      size: 6
+    });
   });
 
   it("does not send publish requests outside the /pastes scope", async () => {

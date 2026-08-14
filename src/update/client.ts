@@ -1,5 +1,8 @@
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
+import type { AppCompatibilityDeclaration, AppCompatibilityResult } from "jolt-sdk";
+import { PASTEY_COMPATIBILITY, checkPasteyCompatibility } from "../api";
+import { isJoltUnavailableError } from "../jolt-errors";
 
 export type PasteyUpdateAvailable = {
   available: true;
@@ -7,7 +10,10 @@ export type PasteyUpdateAvailable = {
   currentVersion: string;
   notes?: string;
   date?: string;
+  compatibility: PasteyUpdateCompatibility;
 };
+
+export type PasteyUpdateCompatibility = AppCompatibilityResult | { status: "unavailable" };
 
 export type PasteyUpdateUnavailable = {
   available: false;
@@ -21,32 +27,94 @@ export type PasteyUpdateClient = {
   installAndRelaunch(): Promise<void>;
 };
 
-let pendingUpdate: Update | null = null;
+type PendingPasteyUpdate = {
+  update: Update;
+  compatibility: PasteyUpdateCompatibility;
+};
+
+let pendingUpdate: PendingPasteyUpdate | null = null;
+
+function compatibilityDeclaration(update: Update): AppCompatibilityDeclaration {
+  const raw = update.rawJson?.app_compatibility;
+  if (!raw || typeof raw !== "object") return PASTEY_COMPATIBILITY;
+
+  const declaration = raw as {
+    app_api?: unknown;
+    required_features?: unknown;
+    optional_features?: unknown;
+  };
+  const validFeatureMap = (value: unknown): value is Record<string, number> => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    return Object.values(value).every(
+      (level) => typeof level === "number" && Number.isInteger(level) && level > 0
+    );
+  };
+  if (
+    !Number.isInteger(declaration.app_api) ||
+    (declaration.app_api as number) < 1 ||
+    !validFeatureMap(declaration.required_features) ||
+    !validFeatureMap(declaration.optional_features)
+  ) {
+    throw new Error("Pastey update has invalid app_compatibility metadata");
+  }
+  return {
+    appApi: declaration.app_api as number,
+    requiredFeatures: declaration.required_features,
+    optionalFeatures: declaration.optional_features
+  };
+}
+
+async function inspectUpdate(update: Update): Promise<PendingPasteyUpdate> {
+  try {
+    const compatibility = await checkPasteyCompatibility(compatibilityDeclaration(update), {
+      refresh: true
+    });
+    return { update, compatibility };
+  } catch (error) {
+    if (isJoltUnavailableError(error)) {
+      return { update, compatibility: { status: "unavailable" } };
+    }
+    throw error;
+  }
+}
 
 export const tauriPasteyUpdateClient: PasteyUpdateClient = {
   async check() {
+    pendingUpdate = null;
     const update = await check();
-    pendingUpdate = update ?? null;
-
     if (!update) {
+      pendingUpdate = null;
       return { available: false };
     }
+    const inspected = await inspectUpdate(update);
+    pendingUpdate = inspected;
 
     return {
       available: true,
       version: update.version,
       currentVersion: update.currentVersion,
       notes: update.body,
-      date: update.date
+      date: update.date,
+      compatibility: inspected.compatibility
     };
   },
 
   async installAndRelaunch() {
-    const update = pendingUpdate ?? (await check());
-    if (!update) {
+    if (!pendingUpdate) {
+      const update = await check();
+      pendingUpdate = update ? await inspectUpdate(update) : null;
+    }
+    if (!pendingUpdate) {
       throw new Error("No Pastey update is pending");
     }
+    if (pendingUpdate.compatibility.status === "incompatible") {
+      throw new Error("This Pastey update requires newer Jolt App API features");
+    }
+    if (pendingUpdate.compatibility.status === "unavailable") {
+      throw new Error("Cannot verify this Pastey update until Jolt is available");
+    }
 
+    const { update } = pendingUpdate;
     pendingUpdate = null;
     await update.downloadAndInstall();
     await relaunch();
