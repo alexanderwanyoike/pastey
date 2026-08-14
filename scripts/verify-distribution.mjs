@@ -13,7 +13,8 @@ const files = {
   packageJson: readFileSync("package.json", "utf8"),
   app: readFileSync("src/App.tsx", "utf8"),
   updateClient: readFileSync("src/update/client.ts", "utf8"),
-  readme: readFileSync("README.md", "utf8")
+  readme: readFileSync("README.md", "utf8"),
+  compatibility: readFileSync("pastey-compatibility.json", "utf8")
 };
 
 const requiredMarkers = {
@@ -32,6 +33,7 @@ const requiredMarkers = {
     "pastey-aarch64.app.tar.gz",
     "pastey-x86_64-setup.exe",
     "write-pastey-update-manifest.mjs",
+    "pastey-compatibility.json",
     "softprops/action-gh-release",
     "refs/tags/"
   ],
@@ -92,6 +94,7 @@ const requiredMarkers = {
     "windows-x86_64"
   ],
   updateManifest: [
+    "pastey-compatibility.json",
     "latest.json",
     "linux-x86_64",
     "darwin-aarch64",
@@ -125,6 +128,16 @@ const requiredMarkers = {
     "xattr -dr com.apple.quarantine"
   ]
 };
+
+const compatibility = JSON.parse(files.compatibility);
+if (!Number.isInteger(compatibility.app_api) || compatibility.app_api < 1) {
+  throw new Error("Pastey compatibility must declare a positive integer app_api");
+}
+for (const field of ["required_features", "optional_features"]) {
+  if (!compatibility[field] || typeof compatibility[field] !== "object") {
+    throw new Error(`Pastey compatibility must declare ${field}`);
+  }
+}
 
 for (const [fileName, markers] of Object.entries(requiredMarkers)) {
   for (const marker of markers) {

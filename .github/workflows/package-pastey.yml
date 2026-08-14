@@ -14,6 +14,7 @@ on:
       - "scripts/install-pastey.sh"
       - "scripts/verify-distribution.mjs"
       - "scripts/write-pastey-update-manifest.mjs"
+      - "pastey-compatibility.json"
       - "package-lock.json"
       - "package.json"
       - "vite.config.ts"

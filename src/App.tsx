@@ -47,11 +47,16 @@ import {
   type PublishResponse,
   type ResolveResponse
 } from "./api";
+import { JOLT_UNAVAILABLE_MESSAGE } from "./jolt-errors";
 import {
   tauriPasteyUpdateClient,
   type PasteyUpdateCheck,
   type PasteyUpdateClient
 } from "./update/client";
+import {
+  enterPasteyRuntime,
+  type PasteyStartupCompatibility
+} from "./startup";
 
 type Toast = {
   tone: "ok" | "warn" | "err";
@@ -210,7 +215,7 @@ function sessionFromStatus(response: AppSessionStatusResponse): PasteySession {
     status: response.status,
     requestId: response.request_id,
     token: response.session_token,
-    identity: response.identity ?? response.requested_identity,
+    identity: response.identity,
     capabilities: response.capabilities,
     // A newer daemon may report a status this build does not know; degrade to
     // a readable message instead of a blank heading.
@@ -253,6 +258,9 @@ export function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [updateCheck, setUpdateCheck] = useState<PasteyUpdateCheck | null>(null);
   const [updateAction, setUpdateAction] = useState<"check" | "install" | null>(null);
+  const [startupCompatibility, setStartupCompatibility] = useState<
+    PasteyStartupCompatibility | { status: "checking" }
+  >({ status: "checking" });
   const updateClient: PasteyUpdateClient = tauriPasteyUpdateClient;
 
   const pastePath = useMemo(() => `${PASTE_PREFIX}${slugify(title) || "untitled"}`, [title]);
@@ -353,34 +361,50 @@ export function App() {
     return null;
   }
 
+  async function refreshCompatibleRuntime() {
+    const stored = loadStoredSession();
+    let token = await syncSession(status?.identity_address ?? session.identity ?? stored?.identity ?? null);
+    let nextStatus: NodeStatus | null = null;
+    let statusError: unknown = null;
+
+    try {
+      nextStatus = await getStatus();
+      setStatus(nextStatus);
+    } catch (error) {
+      statusError = error;
+    }
+
+    if (!token && nextStatus) {
+      token = await syncSession(nextStatus.identity_address);
+    }
+    // A transient token gap must not blank the inventory; keep the last
+    // good list until a token is available again.
+    if (token) {
+      setPublished(await listPublished(token));
+    }
+    if (statusError) {
+      setToast({ tone: "err", source: "connectivity", message: apiErrorMessage(statusError) });
+    } else {
+      // Clear only our own connectivity toast; never wipe the toast a user
+      // action just raised.
+      setToast((current) => (current?.source === "connectivity" ? null : current));
+    }
+  }
+
   async function refresh() {
     try {
-      const stored = loadStoredSession();
-      let token = await syncSession(status?.identity_address ?? session.identity ?? stored?.identity ?? null);
-      let nextStatus: NodeStatus | null = null;
-      let statusError: unknown = null;
-
-      try {
-        nextStatus = await getStatus();
-        setStatus(nextStatus);
-      } catch (error) {
-        statusError = error;
-      }
-
-      if (!token && nextStatus) {
-        token = await syncSession(nextStatus.identity_address);
-      }
-      // A transient token gap must not blank the inventory; keep the last
-      // good list until a token is available again.
-      if (token) {
-        setPublished(await listPublished(token));
-      }
-      if (statusError) {
-        setToast({ tone: "err", source: "connectivity", message: apiErrorMessage(statusError) });
+      if (startupCompatibility.status === "compatible") {
+        await refreshCompatibleRuntime();
       } else {
-        // Clear only our own connectivity toast; never wipe the toast a user
-        // action just raised.
-        setToast((current) => (current?.source === "connectivity" ? null : current));
+        const compatibility = await enterPasteyRuntime(refreshCompatibleRuntime);
+        setStartupCompatibility(compatibility);
+        if (compatibility.status === "unavailable") {
+          setToast({
+            tone: "err",
+            source: "connectivity",
+            message: JOLT_UNAVAILABLE_MESSAGE
+          });
+        }
       }
     } catch (error) {
       setToast({ tone: "err", source: "connectivity", message: apiErrorMessage(error) });
@@ -540,11 +564,11 @@ export function App() {
         setFetched({
           target: nextTarget.trim(),
           text: decodePrivateOpen(opened),
-          contentId: opened.content_id,
+          contentId: opened.contentId,
           size: opened.size,
           visibility: "private",
           status: decrypted ? "decrypted" : "ciphertext",
-          message: decrypted ? undefined : opened.decrypt_error || "This daemon cannot decrypt this paste."
+          message: decrypted ? undefined : opened.decryptError || "This daemon cannot decrypt this paste."
         });
         setToast({
           tone: decrypted ? "ok" : "err",
@@ -611,12 +635,28 @@ export function App() {
     try {
       const nextUpdateCheck = await updateClient.check();
       setUpdateCheck(nextUpdateCheck);
-      setToast({
-        tone: nextUpdateCheck.available ? "ok" : "warn",
-        message: nextUpdateCheck.available
-          ? `Update available: ${nextUpdateCheck.version}`
-          : "Pastey is up to date."
-      });
+      if (!nextUpdateCheck.available) {
+        setToast({ tone: "warn", message: "Pastey is up to date." });
+        return;
+      }
+
+      switch (nextUpdateCheck.compatibility.status) {
+        case "compatible":
+          setToast({ tone: "ok", message: `Update available: ${nextUpdateCheck.version}` });
+          break;
+        case "incompatible":
+          setToast({
+            tone: "warn",
+            message: `Pastey ${nextUpdateCheck.version} needs newer Jolt App API features. Your current Pastey remains installed.`
+          });
+          break;
+        case "unavailable":
+          setToast({
+            tone: "err",
+            message: "Cannot reach the Jolt daemon to verify this Pastey update. Your current Pastey remains installed."
+          });
+          break;
+      }
     } catch (error) {
       setToast({ tone: "err", message: apiErrorMessage(error) });
     } finally {
@@ -632,6 +672,25 @@ export function App() {
       setToast({ tone: "err", message: apiErrorMessage(error) });
       setUpdateAction(null);
     }
+  }
+
+  if (startupCompatibility.status === "incompatible") {
+    return (
+      <main className="shell">
+        <section className="panel" role="alert">
+          <p className="eyebrow">Jolt App API compatibility</p>
+          <h1>Pastey needs a newer Jolt</h1>
+          <p>
+            This Pastey build requires Jolt behavior that the connected daemon does not provide.
+            Pastey stopped before opening a session or changing data.
+          </p>
+          <button type="button" className="primary-button" onClick={() => void manualRefresh()} disabled={refreshing}>
+            {refreshing ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
+            Check again
+          </button>
+        </section>
+      </main>
+    );
   }
 
   return (
@@ -653,7 +712,7 @@ export function App() {
           </div>
         </div>
         <div className="top-actions">
-          {updateCheck?.available ? (
+          {updateCheck?.available && updateCheck.compatibility.status === "compatible" ? (
             <button
               type="button"
               className="update-button"
