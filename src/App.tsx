@@ -637,18 +637,25 @@ export function App() {
       setUpdateCheck(nextUpdateCheck);
       if (!nextUpdateCheck.available) {
         setToast({ tone: "warn", message: "Pastey is up to date." });
-      } else if (nextUpdateCheck.compatibility.status === "compatible") {
-        setToast({ tone: "ok", message: `Update available: ${nextUpdateCheck.version}` });
-      } else if (nextUpdateCheck.compatibility.status === "incompatible") {
-        setToast({
-          tone: "warn",
-          message: `Pastey ${nextUpdateCheck.version} needs newer Jolt App API features. Your current Pastey remains installed.`
-        });
-      } else {
-        setToast({
-          tone: "err",
-          message: "Cannot reach the Jolt daemon to verify this Pastey update. Your current Pastey remains installed."
-        });
+        return;
+      }
+
+      switch (nextUpdateCheck.compatibility.status) {
+        case "compatible":
+          setToast({ tone: "ok", message: `Update available: ${nextUpdateCheck.version}` });
+          break;
+        case "incompatible":
+          setToast({
+            tone: "warn",
+            message: `Pastey ${nextUpdateCheck.version} needs newer Jolt App API features. Your current Pastey remains installed.`
+          });
+          break;
+        case "unavailable":
+          setToast({
+            tone: "err",
+            message: "Cannot reach the Jolt daemon to verify this Pastey update. Your current Pastey remains installed."
+          });
+          break;
       }
     } catch (error) {
       setToast({ tone: "err", message: apiErrorMessage(error) });
