@@ -47,6 +47,7 @@ import {
   type PublishResponse,
   type ResolveResponse
 } from "./api";
+import { JOLT_UNAVAILABLE_MESSAGE } from "./jolt-errors";
 import {
   tauriPasteyUpdateClient,
   type PasteyUpdateCheck,
@@ -260,7 +261,6 @@ export function App() {
   const [startupCompatibility, setStartupCompatibility] = useState<
     PasteyStartupCompatibility | { status: "checking" }
   >({ status: "checking" });
-  const startupCompatibilityRef = useRef(startupCompatibility);
   const updateClient: PasteyUpdateClient = tauriPasteyUpdateClient;
 
   const pastePath = useMemo(() => `${PASTE_PREFIX}${slugify(title) || "untitled"}`, [title]);
@@ -393,17 +393,16 @@ export function App() {
 
   async function refresh() {
     try {
-      if (startupCompatibilityRef.current.status === "compatible") {
+      if (startupCompatibility.status === "compatible") {
         await refreshCompatibleRuntime();
       } else {
         const compatibility = await enterPasteyRuntime(refreshCompatibleRuntime);
-        startupCompatibilityRef.current = compatibility;
         setStartupCompatibility(compatibility);
         if (compatibility.status === "unavailable") {
           setToast({
             tone: "err",
             source: "connectivity",
-            message: "Cannot reach the Jolt daemon. Start Jolt Console and make sure the daemon is running."
+            message: JOLT_UNAVAILABLE_MESSAGE
           });
         }
       }

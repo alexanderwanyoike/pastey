@@ -31,7 +31,7 @@ import {
 import { HttpTransport } from "jolt-sdk/transport-http";
 import { isTauriRuntime, TauriTransport } from "jolt-sdk/transport-tauri";
 import appCompatibility from "../pastey-compatibility.json";
-import { isJoltUnavailableError } from "./jolt-errors";
+import { isJoltUnavailableError, JOLT_UNAVAILABLE_MESSAGE } from "./jolt-errors";
 
 export type {
   AppSessionRequestResponse,
@@ -73,19 +73,9 @@ export const PASTEY_COMPATIBILITY = {
 } as const satisfies AppCompatibilityDeclaration;
 
 // Desktop invokes the tauri-plugin-jolt commands; web hits /app/v1 and
-// /api/v1 directly, which the vite dev proxy forwards to the daemon. Stable
-// per-runtime clients retain the feature manifest cache; token-bound clients
-// remain short-lived so one app-session token cannot leak into another call.
+// /api/v1 directly, which the vite dev proxy forwards to the daemon.
 const desktopTransport = new TauriTransport({ plugin: true });
 const webTransport = new HttpTransport({ bases: { app: "/app/v1", daemon: "/api/v1" } });
-const desktopCompatibilityClient = createJoltClient({
-  transport: desktopTransport,
-  getSessionToken: () => ""
-});
-const webCompatibilityClient = createJoltClient({
-  transport: webTransport,
-  getSessionToken: () => ""
-});
 
 function getTransport(): JoltTransport {
   return isTauriRuntime() ? desktopTransport : webTransport;
@@ -102,13 +92,12 @@ export function checkPasteyCompatibility(
   declaration: AppCompatibilityDeclaration = PASTEY_COMPATIBILITY,
   options?: CompatibilityCheckOptions
 ) {
-  const client = isTauriRuntime() ? desktopCompatibilityClient : webCompatibilityClient;
-  return client.checkCompatibility(declaration, options);
+  return getClient().checkCompatibility(declaration, options);
 }
 
 export function apiErrorMessage(error: unknown) {
   if (isJoltUnavailableError(error)) {
-    return "Cannot reach the Jolt daemon. Start Jolt Console and make sure the daemon is running.";
+    return JOLT_UNAVAILABLE_MESSAGE;
   }
   return sdkApiErrorMessage(error);
 }
@@ -154,7 +143,7 @@ export function publishPaste(sessionToken: string, path: string, text: string) {
     path,
     new TextEncoder().encode(text),
     { fileName: `${path.split("/").pop() || "paste"}.txt`, mimeType: "text/plain" }
-  ) as Promise<PublishResponse>;
+  );
 }
 
 export function publishPrivatePaste(
@@ -172,19 +161,19 @@ export function publishPrivatePaste(
     path,
     new TextEncoder().encode(text),
     { mimeType: "text/plain", recipients }
-  ) as Promise<EncryptedPublishResponse>;
+  );
 }
 
 export function resolveAddress(sessionToken: string, address: string) {
-  return ops.resolveAddress(getTransport(), sessionToken, address) as Promise<ResolveResponse>;
+  return ops.resolveAddress(getTransport(), sessionToken, address);
 }
 
 export function fetchTarget(sessionToken: string, target: string) {
-  return ops.fetchTarget(getTransport(), sessionToken, target) as Promise<FetchResult>;
+  return ops.fetchTarget(getTransport(), sessionToken, target);
 }
 
 export function decryptPaste(sessionToken: string, target: string) {
-  return ops.decryptEncryptedTarget(getTransport(), sessionToken, target) as Promise<DecryptResponse>;
+  return ops.decryptEncryptedTarget(getTransport(), sessionToken, target);
 }
 
 export function openPrivatePaste(sessionToken: string, target: string) {

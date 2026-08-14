@@ -34,8 +34,13 @@ type PendingPasteyUpdate = {
 
 let pendingUpdate: PendingPasteyUpdate | null = null;
 
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
 function compatibilityDeclaration(update: Update): AppCompatibilityDeclaration {
   const raw = update.rawJson?.app_compatibility;
+  // Manifests published before compatibility metadata use this build's baseline.
   if (!raw || typeof raw !== "object") return PASTEY_COMPATIBILITY;
 
   const declaration = raw as {
@@ -45,20 +50,17 @@ function compatibilityDeclaration(update: Update): AppCompatibilityDeclaration {
   };
   const validFeatureMap = (value: unknown): value is Record<string, number> => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-    return Object.values(value).every(
-      (level) => typeof level === "number" && Number.isInteger(level) && level > 0
-    );
+    return Object.values(value).every(isPositiveInteger);
   };
   if (
-    !Number.isInteger(declaration.app_api) ||
-    (declaration.app_api as number) < 1 ||
+    !isPositiveInteger(declaration.app_api) ||
     !validFeatureMap(declaration.required_features) ||
     !validFeatureMap(declaration.optional_features)
   ) {
     throw new Error("Pastey update has invalid app_compatibility metadata");
   }
   return {
-    appApi: declaration.app_api as number,
+    appApi: declaration.app_api,
     requiredFeatures: declaration.required_features,
     optionalFeatures: declaration.optional_features
   };
@@ -83,7 +85,6 @@ export const tauriPasteyUpdateClient: PasteyUpdateClient = {
     pendingUpdate = null;
     const update = await check();
     if (!update) {
-      pendingUpdate = null;
       return { available: false };
     }
     const inspected = await inspectUpdate(update);
