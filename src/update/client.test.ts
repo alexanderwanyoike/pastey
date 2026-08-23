@@ -161,4 +161,20 @@ describe("tauriPasteyUpdateClient", () => {
     expect(update.downloadAndInstall).not.toHaveBeenCalled();
     expect(relaunch).not.toHaveBeenCalled();
   });
+
+  it("does not treat present primitive compatibility metadata as absent", async () => {
+    const update = {
+      version: "0.4.0",
+      currentVersion: "0.3.0",
+      rawJson: { app_compatibility: "invalid" },
+      downloadAndInstall: vi.fn(async () => undefined)
+    };
+    vi.mocked(check).mockResolvedValue(update as never);
+
+    await expect(tauriPasteyUpdateClient.check()).rejects.toThrow(
+      "Pastey update has invalid app_compatibility metadata"
+    );
+    expect(checkPasteyCompatibility).not.toHaveBeenCalled();
+    expect(update.downloadAndInstall).not.toHaveBeenCalled();
+  });
 });
