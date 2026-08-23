@@ -74,4 +74,16 @@ describe("Pastey startup compatibility gate", () => {
     });
     expect(continueStartup).not.toHaveBeenCalled();
   });
+
+  it("does not hide an unexpected TypeError as unavailable", async () => {
+    const continueStartup = vi.fn(async () => undefined);
+    checkPasteyCompatibility.mockRejectedValue(
+      new TypeError("Application decoder bug")
+    );
+
+    await expect(enterPasteyRuntime(continueStartup)).rejects.toThrow(
+      "Application decoder bug"
+    );
+    expect(continueStartup).not.toHaveBeenCalled();
+  });
 });
