@@ -10,6 +10,18 @@ BIN_NAME="${PASTEY_BIN_NAME:-pastey}"
 CHECK_ONLY=0
 DRY_RUN=0
 FORCE=0
+EXTRACT_DIR=""
+
+cleanup() {
+  if [[ -n "$EXTRACT_DIR" && -d "$EXTRACT_DIR" ]]; then
+    rm -rf -- "$EXTRACT_DIR"
+  fi
+  if [[ -n "${TMP_FILE:-}" && -f "$TMP_FILE" ]]; then
+    rm -f -- "$TMP_FILE"
+  fi
+}
+
+trap cleanup EXIT
 
 usage() {
   cat <<'USAGE'
@@ -107,6 +119,50 @@ need curl
 need sed
 need mktemp
 
+install_desktop_integration() {
+  local data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
+  local applications_dir="$data_home/applications"
+  local icons_dir="$data_home/icons/hicolor/128x128/apps"
+  local bundled_icon
+
+  EXTRACT_DIR="$(mktemp -d)"
+  (
+    cd "$EXTRACT_DIR"
+    "$TARGET_BIN" --appimage-extract \
+      usr/share/icons/hicolor/128x128/apps/pastey.png >/dev/null
+  )
+  bundled_icon="$EXTRACT_DIR/squashfs-root/usr/share/icons/hicolor/128x128/apps/pastey.png"
+
+  if [[ ! -f "$bundled_icon" ]]; then
+    echo "Pastey's bundled Linux icon is missing from $ASSET_NAME" >&2
+    return 1
+  fi
+
+  mkdir -p "$applications_dir" "$icons_dir"
+  cp "$bundled_icon" "$icons_dir/net.jolt.pastey.png"
+  chmod 0644 "$icons_dir/net.jolt.pastey.png"
+
+  cat > "$applications_dir/net.jolt.pastey.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=Pastey
+Comment=Public and encrypted pastes over Jolt
+Exec=$TARGET_BIN
+Icon=net.jolt.pastey
+Terminal=false
+Categories=Network;Utility;
+StartupWMClass=pastey
+DESKTOP
+  chmod 0644 "$applications_dir/net.jolt.pastey.desktop"
+
+  if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$applications_dir" >/dev/null 2>&1 || true
+  fi
+
+  rm -rf -- "$EXTRACT_DIR"
+  EXTRACT_DIR=""
+}
+
 if [[ "$VERSION" == "latest" ]]; then
   RESOLVED_VERSION="$(latest_tag)"
 else
@@ -147,20 +203,22 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
 fi
 
 if [[ "$FORCE" -eq 0 && "$CURRENT_VERSION" == "$RESOLVED_VERSION" && -x "$TARGET_BIN" ]]; then
+  install_desktop_integration
   echo "Pastey is already installed at $RESOLVED_VERSION."
   exit 0
 fi
 
 mkdir -p "$INSTALL_DIR" "$STATE_DIR"
 TMP_FILE="$(mktemp)"
-trap 'rm -f "$TMP_FILE"' EXIT
 
 echo "==> Downloading Pastey $RESOLVED_VERSION"
 run_with_retries 5 curl -fL "$DOWNLOAD_URL" -o "$TMP_FILE"
 chmod 0755 "$TMP_FILE"
 mv "$TMP_FILE" "$TARGET_BIN"
+TMP_FILE=""
 printf '%s\n' "$RESOLVED_VERSION" > "$STATE_DIR/version"
 printf '%s\n' "$ASSET_NAME" > "$STATE_DIR/asset"
+install_desktop_integration
 
 cat <<DONE
 ==> Installed Pastey
