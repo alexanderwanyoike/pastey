@@ -24,6 +24,11 @@ The installer downloads `pastey-x86_64.AppImage` to:
 ~/.local/bin/pastey
 ```
 
+On Linux it also installs Pastey's desktop entry and bundled icon under your
+XDG data directory, so launchers, taskbars, and app switchers show the Pastey
+icon. Re-running the installer repairs that desktop integration even when the
+installed version is already current.
+
 Check whether a newer release exists:
 
 ```sh
